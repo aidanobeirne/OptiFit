@@ -1,2 +1,3 @@
 graft TransferMatrix
 graft TransferMatrix/refractive_index_data
+graft TransferMatrix/examples
