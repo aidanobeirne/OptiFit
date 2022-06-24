@@ -1,4 +1,4 @@
-from lmfit import Parameters, Minimizer
+from lmfit import Parameters, Minimizer, report_fit, minimize
 import matplotlib.pyplot as plt
 import numpy as np
 import csv
@@ -132,13 +132,16 @@ class tmm_model:
 		return RC
 
 	def loss(self, p):
-		self.params = p
-		return self.calc_rc()-self.spectrum 
+		self.params = p 
+		return np.array(self.calc_rc())-np.array(self.spectrum) 
 
-	def fit(self):
+	def fit(self, method='leastsq'):
 		A = Minimizer(self.loss, self.params)
-		result = A.minimize()
-		self.params = result.params
+		self.result = A.minimize(method=method)
+		self.params = self.result.params
+		
+	def report_fit(self):
+		return report_fit(self.result.params)
 	
 	def verify_params(self):
 		for param in self.params:
