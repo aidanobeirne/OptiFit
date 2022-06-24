@@ -1,4 +1,4 @@
-from lmfit import Parameters, Minimizer, report_fit, minimize
+from lmfit import Parameters, Minimizer, report_fit
 import matplotlib.pyplot as plt
 import numpy as np
 import csv
@@ -61,11 +61,11 @@ class tmm_model:
 
 		path = 'none'
 		if ('graphene' in name or 'graphite' in name) and ('full' in name):
-			path = os.path.join(os.path.dirname(__file__),'graphite_refractive_index_info-eV.csv')
+			path = os.path.join(os.path.dirname(__file__), 'refractive_index_data', 'graphite_refractive_index_info-eV.csv')
 		elif ('quartz' in name or 'sio2' in name or 'Sio2' in name or 'SiO2' in name) and ('full' in name):
-			path = os.path.join(os.path.dirname(__file__),'quartz_refractive_index_info-eV.csv')
+			path = os.path.join(os.path.dirname(__file__), 'refractive_index_data', 'quartz_refractive_index_info-eV.csv')
 		elif ('bare_si' in name or 'Si' in name or 'si' in name) and ('full' in name):
-			path = os.path.join(os.path.dirname(__file__),'silicon_refractive_index_info-eV.csv')
+			path = os.path.join(os.path.dirname(__file__), 'refractive_index_data', 'silicon_refractive_index_info-eV.csv')
 		elif ('hbn' in name or 'hBN' in name) and ('full' in name):
 			path = 'custom'
 			n = 2.23 - 6.9e-4*1240/self.energies + 1j*0 # apparently in O.  Stenzel et al., Phys.  Status  Solidi  A (1996), but taken from Kim et al. JOSK 19, 503 (2015)
@@ -149,3 +149,28 @@ class tmm_model:
 				pass
 			else:
 				raise ValueError('{} has an initial guess that is not within the bounds'.format(param))
+
+# def complex_lorentzian(self, x, a, x0, w):
+# 		denominator=(x0**2-x**2)**2+(x**2*w**2)
+# 		real=a*(x0**2-x**2)/denominator
+# 		imag=x*w*a/denominator
+# 		lor=real+1j*imag
+# 		return lor
+
+# class CompositeModel():
+# 	def __init__(self):
+# 		super().__init__
+		
+	
+# 	def add_voigt(self, domain, name, param_dict):
+# 		mod = VoigtModel(independent_vars=domain, prefix=name, nan_policy='raise')
+# 		for variable in param_dict.keys():
+# 			mod.set_param_hint(variable, value=param_dict[variable]['initial guess'], min=param_dict[variable]['min'], max=param_dict[variable]['max'])
+# 		mod.make_params()
+# 		try:
+# 			self.model += mod
+# 		except AttributeError:
+# 			self.model = mod
+
+
+
