@@ -8,7 +8,7 @@ setup(
     author_email='aidanobeirne@me.com',
     url='https://github.com/aidanobeirne/TransferMatrix.git',
     packages=['TransferMatrix'],# 'TransferMatrix.*'],
-    scripts=['examples/RC_fit_example'],
+    # scripts=['TransferMatrix/examples/RC_fit_example'],
     include_package_data=True,
     install_requires=['lmfit', 'solcore']
 )
