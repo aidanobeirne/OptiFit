@@ -1,2 +1,1 @@
-global-exclude *.py[co]
 graft TransferMatrix

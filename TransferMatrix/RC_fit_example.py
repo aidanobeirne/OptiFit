@@ -22,7 +22,7 @@ def shift_correction_range(spectra, energies, e_min, e_max):
         temp.append(np.array(spec)+shift)
     return temp
 
-file = open(r'TransferMatrix/test_data.pkl', 'rb')
+file = open(r'test_data.pkl', 'rb')
 master_data = pickle.load(file)
 file.close()
 
