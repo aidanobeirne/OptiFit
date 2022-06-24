@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='LightWork',
+    name='TransferMatrix',
     version='1.0',
     description='Combining methods from solcore and Lmfit for an easy-to-use fitting procedure of thin film reflection contrast data',
     author='Aidan OBeirne',
