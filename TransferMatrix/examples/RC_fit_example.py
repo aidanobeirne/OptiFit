@@ -47,7 +47,7 @@ model.add_layer('top_hbn_full',   [18, False, 9, 20],      [3.9, False, 0, 5.3, 
 model.add_layer('sample', [0.7, False, 0.1, 2.7],     [1, True, 0, np.inf, None, None])
 model.add_layer('bottom_hbn_full',   [13, False, 10, 25],      [3.9, False, 0, 5.3, None, None])
 model.add_layer('bottom_graphite_full',   [3.2, False, 0.3, 58.1],    [1, False, 0, np.inf])
-model.add_layer('quartz', [np.inf, False, 0, np.inf], [1.455, False, 1.440, 1.459, None, None])
+model.add_layer('quartz_full', [np.inf, False, 0, np.inf], [1.455, False, 1.440, 1.459, None, None])
 
 #### Background dielectric function (not including the +1 for epsilon(inf))
 model.params.add('eps_sample_r', 0, False, 0, 7)
