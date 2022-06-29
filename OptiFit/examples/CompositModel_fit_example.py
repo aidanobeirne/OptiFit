@@ -1,7 +1,7 @@
 import pickle
 import matplotlib.pyplot as plt
 from lmfit.models import LinearModel, LorentzianModel, VoigtModel, GaussianModel
-from TransferMatrix import models as models
+from OptiFit import models as models
 
 
 

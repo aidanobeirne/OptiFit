@@ -1,14 +1,13 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='TransferMatrix',
+    name='OptiFit',
     version='1.0',
-    description='Combining methods from solcore and Lmfit for an easy-to-use fitting procedure of thin film reflection contrast data',
+    description='Combining methods from solcore and lmfit for an easy-to-use fitting procedure of thin film reflection contrast data and PL data',
     author='Aidan OBeirne',
     author_email='aidanobeirne@me.com',
-    url='https://github.com/aidanobeirne/TransferMatrix.git',
-    packages=['TransferMatrix'],# 'TransferMatrix.*'],
-    # scripts=['TransferMatrix/examples/RC_fit_example'],
+    url='https://github.com/aidanobeirne/OptiFit.git',
+    packages=['OptiFit'],
     include_package_data=True,
     install_requires=['lmfit', 'solcore']
 )

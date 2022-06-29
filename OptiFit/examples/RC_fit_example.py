@@ -2,7 +2,7 @@ import numpy as np
 import pickle
 import matplotlib.pyplot as plt
 from lmfit import report_fit
-from TransferMatrix import models as models
+from OptiFit import models as models
 
 parameters = {'axes.labelsize': 15,
               'axes.titlesize': 25,
