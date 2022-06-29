@@ -8,6 +8,16 @@ import copy
 
 
 def interpolate_domain(known_yvals, known_domain, desired_domain):
+	""" interpolates a dataset within a domain
+
+	Args:
+		known_yvals (array or list): the y data points to be interpolated
+		known_domain (array or list): the x data points that correspond to known_yvals
+		desired_domain (array or list): the domain over which the data set will be interpolated
+
+	Returns:
+		(array): the interpolated domain
+	"""
 	known_domain = np.array(known_domain)
 	desired_domain = np.array(desired_domain)
 	minidx = np.where(known_domain == known_domain[known_domain < np.min(desired_domain)].max())[0][0]
@@ -17,18 +27,28 @@ def interpolate_domain(known_yvals, known_domain, desired_domain):
 	return np.interp(desired_domain, known_domain, known_yvals)
 
 def import_rinfo(path):
-		with open(path, 'r') as f:
-			reader = csv.reader(f, delimiter=',')
-			headers = next(reader)
-			rinfo = np.array(list(reader)).astype(float).T
-			energies = rinfo[0]
-			n = rinfo[1]
-			try:
-				k = rinfo[2]
-				return energies, n, k
-			except IndexError:
-				return energies, n, 0*np.ones_like(n)
-class tmm_model:
+	"""imports data from a csv that is downloaded from refractiveindex.info
+
+	Args:
+		path (str): path to csv
+
+	Returns:
+		tuple containing: energies, real part of the refractive index, imaginary part of the refractive index (k)
+	"""
+	with open(path, 'r') as f:
+		reader = csv.reader(f, delimiter=',')
+		headers = next(reader)
+		rinfo = np.array(list(reader)).astype(float).T
+		energies = rinfo[0]
+		n = rinfo[1]
+		try:
+			k = rinfo[2]
+			return energies, n, k
+		except IndexError:
+			return energies, n, 0*np.ones_like(n)
+class TransferMatrixModel:
+	""" Transfer Matrix model Class
+	"""
 	def __init__(self, spectrum, energies):
 		self.spectrum = spectrum
 		self.energies = energies
@@ -83,24 +103,24 @@ class tmm_model:
 			n_interpolated = interpolate_domain(nr, energies, self.energies)
 			k_interpolated = interpolate_domain(k, energies, self.energies)
 			n[0] = n_interpolated + 1j*k_interpolated
-			self.layers[name] = {'n': n[0], 'd': d[0], 'vary': False} # these are refractive indices with pre-existing models and we will not vary them in the fit
+			self.layers[name] = {'n': n[0], 'd': d[0], 'vary': False, 'imported model': True} # these are refractive indices with pre-existing models and we will not vary them in the fit
 		elif 'custom' in path:
 			n[0] = n_custom
-			self.layers[name] = {'n': n[0], 'd': d[0], 'vary': False} 
+			self.layers[name] = {'n': n[0], 'd': d[0], 'vary': False, 'imported model': True} 
 		elif 'none' in path and 'sample' in name:
 			n[0] = self.calc_n_sample()
-			self.layers[name] = {'n': n[0], 'd': d[0], 'vary': False} 
+			self.layers[name] = {'n': n[0], 'd': d[0], 'vary': False, 'imported model': True} 
 		# this clause means that we actually want to vary the refractive index as a fit parameter (hopefully this does not occur often, as it only works for constant values of nreal and nimag)
 		elif 'none' in path and 'sample' not in name:
 			if n[0] is complex:
-				nreal = [np.real(n[0]), n[1], np.real(n[2]), np.real(n[3])]
-				nimag = [np.imag(n[0]), n[1], np.imag(n[2]), np.imag(n[3])]
+				nreal = [float(np.real(n[0])), n[1], np.real(n[2]), np.real(n[3])]
+				nimag = [float(np.imag(n[0])), n[1], np.imag(n[2]), np.imag(n[3])]
 				self.params.add('{}_nreal'.format(name), *nreal)
 				self.params.add('{}_nimag'.format(name), *nimag)
-				self.layers[name] = {'nreal': nreal, 'nimag': nimag, 'd': d, 'vary': n[1]} # these refractive indices behave as fit parameters
+				self.layers[name] = {'nreal': nreal, 'nimag': nimag, 'd': d, 'vary': n[1], 'imported model': False} # these refractive indices behave as fit parameters
 			else:
 				self.params.add('{}_n'.format(name), *n)
-				self.layers[name] = {'nreal': nreal, 'nimag': nimag, 'd': d, 'vary': n[1]} 
+				self.layers[name] = {'n': float(n[0]), 'd': d, 'vary': n[1], 'imported model': False} 
 		
 		# always add the thicknesses to the parameters object
 		self.params.add('{}_d'.format(name), *d)
@@ -112,12 +132,17 @@ class tmm_model:
 			if 'sample' in layer and includesample:
 				nvals.append(self.calc_n_sample())
 			elif 'sample' in layer and not includesample:
-				pass
+				continue
 			else:
-				if value['vary'] == False: 
+				if value['imported model'] == True: 
 					nvals.append(self.layers[layer]['n']) # pre-existing model stored in the layer dictionary
 				else:
-					nvals.append(self.params['{}_n'.format(layer)].value) # fit parameter stored in the params object
+					try:
+						nreal = self.params['{}_nreal'.format(layer)].value*np.ones_like(self.energies)
+						nimag = self.params['{}_imag'.format(layer)].value*np.ones_like(self.energies)
+						nvals.append(nreal+nimag*1j) # fit parameter stored in the params object
+					except KeyError:
+						nvals.append(self.params['{}_n'.format(layer)].value*np.ones_like(self.energies)) # fit parameter stored in the params object
 		return nvals
 
 	def get_dvals(self, includesample):
@@ -186,26 +211,18 @@ class tmm_model:
 			else:
 				raise ValueError('{} has an initial guess that is not within the bounds'.format(param))
 
-class CompositeModel(Model):
+class CompositeModel():
+	"""Used to fit PL data with a variable number of peaks
+	"""
 	def __init__(self):
-		super().__init__()
 		self.components = []
-		
-	# def add_eps_inf(self):
-	# 	# execute this function if the model is of a dielectric function
-	# 	mod = Model(eps_inf)
-	# 	mod.set_param_hint(vary=False)
-	# 	try:
-	# 		self += mod
-	# 	except AttributeError:
-	# 		self = mod
 
-	def add_component(self, func, params_dict, name='peak1', prefix='pk1'):
-		self.components.append(prefix)
-		mod = Model(func=func, name=name, prefix=prefix)
+	def add_component(self, func_or_model, params_dict, name='peak1'):
+		self.components.append(name)
+		mod = func_or_model(prefix=name)
 		for parameter, pdict in params_dict.items():
-			mod.set_param_hint(parameter, **pdict)
+			mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
 		try:
-			self += mod # add component to the model
+			self.Model += mod # add component to the model
 		except AttributeError:
-			self = mod
+			self.Model = mod
