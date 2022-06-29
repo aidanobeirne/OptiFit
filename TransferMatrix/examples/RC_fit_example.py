@@ -1,6 +1,7 @@
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
+from lmfit import report_fit
 from TransferMatrix import models as models
 
 parameters = {'axes.labelsize': 15,
@@ -29,7 +30,7 @@ spectra = shift_correction_range(master_data[identifier]['RC'], energies, 1.372,
 
 
 ############################################################################ TMM calculation with fit below ################################################
-model = models.tmm_model(spectrum=spectra[50], energies=energies)
+model = models.TransferMatrixModel(spectrum=spectra[50], energies=energies)
 model.add_lorentzian(name='pk1',
                     amplitude=[2, True, 0, np.inf],
                     resonant_energy=[1.7, True, 1.65, 1.75],
@@ -58,7 +59,7 @@ model.params.add('offset', 0, True, -np.inf, np.inf)
 model.params.add('slope', 0, True, -np.inf, np.inf)
 
 initial_guess = model.calc_rc()
-model.fit()
+result = model.fit()
 result_spec = model.calc_rc()
 
 plt.figure()
@@ -78,6 +79,6 @@ ax[1].plot(model.energies, np.real(eps), color = 'C3', label = '$\epsilon_r$ of 
 ax[1].legend()
 ax[1].set_xlabel('Energy (eV)')
 
-model.report_fit()
+report_fit(result)
 
 
