@@ -7,7 +7,7 @@ setup(
     author='Aidan OBeirne',
     author_email='aidanobeirne@me.com',
     url='https://github.com/aidanobeirne/OptiFit.git',
-    packages=find_packages() #['OptiFit'],
+    packages=find_packages(), #['OptiFit'],
     include_package_data=True,
     scripts = ['OptiFit/examples/RC_fit_example/CompositModel_fit_example']
     install_requires=['lmfit', 'solcore']
