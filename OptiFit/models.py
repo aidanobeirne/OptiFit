@@ -215,14 +215,36 @@ class CompositeModel():
 	"""Used to fit PL data with a variable number of peaks
 	"""
 	def __init__(self):
-		self.components = []
+		self.components = {}
 
 	def add_component(self, func_or_model, params_dict, name='peak1'):
-		self.components.append(name)
+		if name[-1] != '_':
+			name += '_'
 		mod = func_or_model(prefix=name)
 		for parameter, pdict in params_dict.items():
 			mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
+		self.components[name] = mod # internal reference to the specific component
 		try:
 			self.Model += mod # add component to the model
 		except AttributeError:
 			self.Model = mod
+
+	def fit(self, data, params=None, weights=None, method='leastsq', iter_cb=None, scale_covar=True, verbose=False, fit_kws=None, nan_policy=None, calc_covar=True, max_nfev=None, **kwargs):
+		result = self.Model.fit(data, params, weights, method, iter_cb, scale_covar, verbose, fit_kws, nan_policy, calc_covar, max_nfev, **kwargs)
+		self.result = result
+		return result
+
+	def plot_fit_resolved(self, energies, data):
+		plt.figure()
+		plt.plot(energies, data, label='data', marker = 'o', color='black', markersize=1, linewidth=0.5)
+		params = {}
+		total = np.zeros_like(energies)
+		for component_name, model in self.components.items():
+			for name in model.param_names:
+				# find this parameter value in the instance Model and assign it to the parameter here
+				params[name.removeprefix(component_name)] = self.result.params[name].value
+			spec = model.eval(**params, x=energies)
+			total+=spec
+			plt.plot(energies, spec, label = component_name[:-1])
+		# plt.plot(energies, total, label='total')
+		plt.legend()
