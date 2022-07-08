@@ -1,5 +1,6 @@
 from lmfit import Parameters, Minimizer, report_fit, Model
 import matplotlib.pyplot as plt
+from more_itertools import last
 import numpy as np
 import csv
 from solcore.absorption_calculator.tmm_core_vec import coh_tmm
@@ -237,14 +238,96 @@ class CompositeModel():
 	def plot_fit_resolved(self, energies, data):
 		plt.figure()
 		plt.plot(energies, data, label='data', marker = 'o', color='black', markersize=1, linewidth=0.5)
-		params = {}
-		total = np.zeros_like(energies)
+		
 		for component_name, model in self.components.items():
+			params = {}
 			for name in model.param_names:
 				# find this parameter value in the instance Model and assign it to the parameter here
 				params[name.removeprefix(component_name)] = self.result.params[name].value
 			spec = model.eval(**params, x=energies)
-			total+=spec
 			plt.plot(energies, spec, label = component_name[:-1])
-		# plt.plot(energies, total, label='total')
 		plt.legend()
+	
+	def plot_fit_color_coded(self, energies, data):
+		from matplotlib.collections import LineCollection
+		from matplotlib.colors import to_rgb
+
+		fig, ax = plt.subplots()
+		ax.plot(energies, data, label='data', marker = 'o', color='black', markersize=1, linewidth=0.5, zorder=0)
+
+		curves = []
+		curvenames = []
+		colors = []
+		# retrieve each curve
+		for count, (component_name, model) in enumerate(self.components.items()):
+			params = {}
+			for name in model.param_names:
+				# find this parameter value in the instance Model and assign it to the parameter here
+				params[name.removeprefix(component_name)] = self.result.params[name].value
+			spec = model.eval(**params, x=energies)
+			curves.append(spec)
+			colors.append(to_rgb('C{}'.format(count)))
+			curvenames.append(name.split('_')[0])
+
+		segments = []
+		segment_colors = []
+		segment_labels = []
+		for count, curve_values in enumerate(np.array(curves).T):
+			# find the curve that is a maximum
+			curveidx = np.argmax(curve_values)
+			if count == 0:
+				last_curveidx = curveidx
+				index_of_last_segment_end = 1
+				continue
+			if curveidx != last_curveidx:
+				a = np.array(energies[index_of_last_segment_end-1:count])
+				b = np.array(self.result.best_fit[index_of_last_segment_end-1:count])
+				# import pdb; pdb.set_trace()
+				new_segment = np.column_stack((a,b))
+				segments.append(new_segment)
+				segment_colors.append(colors[curveidx])
+				segment_labels.append(curvenames[curveidx])
+				index_of_last_segment_end = count
+			if count == len(np.array(curves).T) - 1:
+				print('found the end')
+				a = np.array(energies[index_of_last_segment_end-1:count])
+				b = np.array(self.result.best_fit[index_of_last_segment_end-1:count])
+				new_segment = np.column_stack((a,b))
+				segments.append(new_segment)
+				segment_colors.append(colors[curveidx])
+				segment_labels.append(curvenames[curveidx])
+				index_of_last_segment_end = count
+			last_curveidx = curveidx
+		# import pdb; pdb.set_trace()
+		line_segments = LineCollection(segments, colors=segment_colors, linewidths=3)
+		ax.add_collection(line_segments)
+
+
+
+		#######################
+		# segments = []
+		# colors = []
+		# last_curve = -1
+		# index_of_last_segment_end = 0
+		# for count, column in enumerate(np.array(curves).T):
+		# 	# get the curve that is a maximum
+		# 	curve = np.argmax(column)
+		# 	if curve != last_curve:
+		# 		colors.append(to_rgb('C{}'.format(curve)))
+		# 		a = np.array(energies[index_of_last_segment_end-1:count])
+		# 		b = np.array(self.result.best_fit[index_of_last_segment_end-1:count])
+		# 		new_segment = np.column_stack((a,b))
+		# 		segments.append(new_segment)
+		# 		index_of_last_segment_end = count
+		# 	last_curve = curve
+		# line_segments = LineCollection(segments, colors=colors, linewidths=3)
+		# # line_segments.set_array(energies)
+		# ax.add_collection(line_segments)
+
+		# handles, labels = plt.gca().get_legend_handles_labels()
+		# by_label = dict(zip(labels, handles))
+		# plt.legend(by_label.values(), by_label.keys())
+
+		# ax.legend(colors, curvenames)
+		plt.show()
+
