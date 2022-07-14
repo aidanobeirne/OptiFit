@@ -97,7 +97,7 @@ class TransferMatrixModel:
 				if '2019' in name:
 					n_custom = np.sqrt(1+3.263*wls**2/(wls**2 - (164.4)**2)) + 1j*0 # Phys. Status Solidi B 2019, 256, 1800417 ----------------- much better in NIR
 				else:
-					n_custom = 2.23 - 6.9e-4*wls + 1j*0 # apparently in O.  Stenzel et al., Phys.  Status  Solidi  A (1996), but taken from Kim et al. JOSK 19, 503 (2015) -------------------- much better in VIS	
+					n_custom = 2.23 - 6.9e-4*wls + 1j*0 # apparently in O.  Stenzel et al., Phys.  Status  Solidi  A (1996), but taken from Kim et al. JOSK 19, 503 (2015) -------------------- much better in VIS    
 
 		if 'csv' in path:
 			energies, nr, k = import_rinfo(path)
@@ -212,6 +212,8 @@ class TransferMatrixModel:
 			else:
 				raise ValueError('{} has an initial guess that is not within the bounds'.format(param))
 
+
+
 class CompositeModel():
 	"""Used to fit PL data with a variable number of peaks
 	"""
@@ -250,8 +252,8 @@ class CompositeModel():
 	
 	def plot_fit_color_coded(self, energies, data):
 		from matplotlib.collections import LineCollection
-		from matplotlib.colors import to_rgb
-
+		from matplotlib.colors import to_rgb, rgb_to_hsv
+		from matplotlib.lines import Line2D
 		fig, ax = plt.subplots()
 		ax.plot(energies, data, label='data', marker = 'o', color='black', markersize=1, linewidth=0.5, zorder=0)
 
@@ -269,65 +271,41 @@ class CompositeModel():
 			colors.append(to_rgb('C{}'.format(count)))
 			curvenames.append(name.split('_')[0])
 
+		curve_to_plot = np.argmax(np.array(curves).T, axis=1)
+		curve_changes = np.where(curve_to_plot[:-1] != curve_to_plot[1:])[0]
+		segment_names = []
 		segments = []
 		segment_colors = []
-		segment_labels = []
-		for count, curve_values in enumerate(np.array(curves).T):
-			# find the curve that is a maximum
-			curveidx = np.argmax(curve_values)
+
+		for count, changeidx in enumerate(curve_changes):
+			curveidx = curve_to_plot[changeidx-1]
 			if count == 0:
-				last_curveidx = curveidx
-				index_of_last_segment_end = 1
-				continue
-			if curveidx != last_curveidx:
-				a = np.array(energies[index_of_last_segment_end-1:count])
-				b = np.array(self.result.best_fit[index_of_last_segment_end-1:count])
-				# import pdb; pdb.set_trace()
-				new_segment = np.column_stack((a,b))
+				x = np.array(energies[0:changeidx+1])
+				y = np.array(self.result.best_fit[0:changeidx+1])
+			else:
+				x = np.array(energies[curve_changes[count-1]:changeidx+1])
+				y = np.array(self.result.best_fit[curve_changes[count-1]:changeidx+1])
+			
+			new_segment = np.column_stack((x,y))
+			segments.append(new_segment)
+			segment_colors.append(colors[curveidx])
+			segment_names.append(curvenames[curveidx])
+			
+			if count == len(curve_changes)-1: # need to add the last curve
+				curveidx = curve_to_plot[changeidx+1]
+				x = np.array(energies[changeidx:-1])
+				y = np.array(self.result.best_fit[changeidx:-1])
+				new_segment = np.column_stack((x,y))
 				segments.append(new_segment)
 				segment_colors.append(colors[curveidx])
-				segment_labels.append(curvenames[curveidx])
-				index_of_last_segment_end = count
-			if count == len(np.array(curves).T) - 1:
-				print('found the end')
-				a = np.array(energies[index_of_last_segment_end-1:count])
-				b = np.array(self.result.best_fit[index_of_last_segment_end-1:count])
-				new_segment = np.column_stack((a,b))
-				segments.append(new_segment)
-				segment_colors.append(colors[curveidx])
-				segment_labels.append(curvenames[curveidx])
-				index_of_last_segment_end = count
-			last_curveidx = curveidx
-		# import pdb; pdb.set_trace()
+				segment_names.append(curvenames[curveidx])
+				
 		line_segments = LineCollection(segments, colors=segment_colors, linewidths=3)
+		proxies = []
+		for color in colors:
+			proxy = Line2D([0, 1], [0, 1], color=color)
+			proxies.append(proxy)
+		ax.legend(proxies, curvenames)
 		ax.add_collection(line_segments)
-
-
-
-		#######################
-		# segments = []
-		# colors = []
-		# last_curve = -1
-		# index_of_last_segment_end = 0
-		# for count, column in enumerate(np.array(curves).T):
-		# 	# get the curve that is a maximum
-		# 	curve = np.argmax(column)
-		# 	if curve != last_curve:
-		# 		colors.append(to_rgb('C{}'.format(curve)))
-		# 		a = np.array(energies[index_of_last_segment_end-1:count])
-		# 		b = np.array(self.result.best_fit[index_of_last_segment_end-1:count])
-		# 		new_segment = np.column_stack((a,b))
-		# 		segments.append(new_segment)
-		# 		index_of_last_segment_end = count
-		# 	last_curve = curve
-		# line_segments = LineCollection(segments, colors=colors, linewidths=3)
-		# # line_segments.set_array(energies)
-		# ax.add_collection(line_segments)
-
-		# handles, labels = plt.gca().get_legend_handles_labels()
-		# by_label = dict(zip(labels, handles))
-		# plt.legend(by_label.values(), by_label.keys())
-
-		# ax.legend(colors, curvenames)
 		plt.show()
 
