@@ -18,7 +18,7 @@ params_dict = {'slope':{'value': 0.0, 'vary': True, 'min': -1, 'max': 1},
                'intercept':{'value': 0.03, 'vary': True, 'min': -500, 'max':500}
                }
 model.add_component(LinearModel, params_dict, name='background_')
-# add a Voigt for the neutral exciton
+# add a Gaussian for the neutral exciton
 params_dict = {'height':{'value': 3000, 'vary': True, 'min': 1, 'max': 6000},
                'center':{'value': 1.72, 'vary': True, 'min': 1.5, 'max': 2},
                'sigma':{'value': 0.03, 'vary': True, 'min': 0.001, 'max': 0.5}
