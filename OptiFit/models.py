@@ -1,3 +1,4 @@
+from xml.dom.minidom import Attr
 from lmfit import Parameters, Minimizer, report_fit, Model
 import matplotlib.pyplot as plt
 from more_itertools import last
@@ -69,8 +70,16 @@ class TransferMatrixModel:
 		self.params.add('{}_x0'.format(name), *resonant_energy)
 		self.params.add('{}_w'.format(name), *broadening)
 		self.peaks.append(name) # store the peaks in an instance attribute for easier access later
-		self.verify_params()
 
+	def add_background(self, func, params_dict, name='background'):
+		# self.background_pdict = {}
+		if name[-1] != '_':
+			name += '_'
+		for parameter, pdict in params_dict.items():
+			self.params.add('{}{}'.format(name, parameter), **pdict)
+ 
+		self.background = func
+		self.background_name = name
 
 	def add_layer(self, name, d, n):
 		graphite_words = ['graphene', 'Graphene', 'graphite', 'Graphite', 'gr', 'Gr']
@@ -147,7 +156,7 @@ class TransferMatrixModel:
 		return nvals
 
 	def get_dvals(self, includesample):
-		# Function retrieves the refractive thicknesses, d from the params object, for every layer in the stack
+		# Function retrieves the thicknesses, d from the params object, for every layer in the stack
 		dvals = []
 		for layer in self.layers.keys():
 			if 'sample' in layer and not includesample:
@@ -175,12 +184,15 @@ class TransferMatrixModel:
 	def calc_rc(self):
 		target = self.tmm_calc(includesample=True)['R']
 		ref = self.tmm_calc(includesample=False)['R']
+		# import pdb; pdb.set_trace()
 		try:
-			RC = (target - ref) / ref + self.params['offset'] + self.params['slope']*(self.energies - min(self.energies))
+			# RC = (target - ref) / ref + self.params['offset'] + self.params['slope']*(self.energies - min(self.energies))
+			RC = (target - ref) / ref + self.calc_bg()
 		except KeyError:
-			(target - ref) / ref
+			RC = (target - ref) / ref
+			print('ok')
 		return RC
-
+	
 	def calc_rc_resolved(self):
 		RC_dict = {}
 		RC_dict['total'] = self.calc_rc()
@@ -195,12 +207,21 @@ class TransferMatrixModel:
 			ref = coh_tmm('s', self.get_nvals(includesample = False), self.get_dvals(includesample = False), 0 + 1j*0, 1240/self.energies)['R']
 			RC_dict[peak] = (target-ref)/ref
 		return RC_dict
-	
+
+	def calc_bg(self):
+		args = {}
+		for param in self.params:
+			if self.background_name in param:
+				args[param.split('_')[1]] = self.params[param].value
+		bg = self.background(energies=self.energies, **args)
+		return  bg 
+
 	def loss(self, p):
 		self.params = p 
 		return np.array(self.calc_rc())-np.array(self.spectrum) 
 
 	def fit(self, method='leastsq'):
+		self.verify_params()
 		A = Minimizer(self.loss, self.params, nan_policy='omit')
 		result = A.minimize(method=method)
 		return result
