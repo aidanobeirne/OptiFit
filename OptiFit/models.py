@@ -204,6 +204,15 @@ class TransferMatrixModel:
 		A = Minimizer(self.loss, self.params, nan_policy='omit')
 		result = A.minimize(method=method)
 		return result
+
+	def loss_with_background(self, p):
+		self.params = p 
+		return np.array(self.calc_rc()) + self.background - np.array(self.spectrum) 
+
+	def fit_with_background(self, method='leastsq'):
+		A = Minimizer(self.loss, self.params, nan_policy='omit')
+		result = A.minimize(method=method)
+		return result
 	
 	def verify_params(self):
 		for param in self.params:
