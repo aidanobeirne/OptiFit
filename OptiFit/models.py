@@ -83,20 +83,26 @@ class TransferMatrixModel:
 
 	def add_layer(self, name, d, n):
 		graphite_words = ['graphene', 'Graphene', 'graphite', 'Graphite', 'gr', 'Gr']
-		quartz_words = ['quartz', 'Quartz', 'SiO2', 'sio2', 'oxide']
+		fused_silica_words = ['SiO2', 'sio2', 'oxide', 'silica']
+		crystalline_quartz_words = ['quartz', 'Quartz']
 		silicon_words = ['Silicon', 'silicon', 'Si', 'si']
 		air_words = ['air', 'Air', 'Empty', 'empty', 'vacuum']
-		hbn_words = ['hBN', 'hbn']
+		hbn_words = ['hBN', 'hbn', 'HBN']
 
 		path = 'none'
 		if 'full' in name:
 			n[1] = False # set vary to False in case it was accidentally set to True
 			if any(word in name for word in graphite_words):
 				path = os.path.join(os.path.dirname(__file__), 'refractive_index_data', 'graphite_refractive_index_info-eV.csv')
-			elif any(word in name for word in quartz_words):
+			elif any(word in name for word in fused_silica_words):
 				path = os.path.join(os.path.dirname(__file__), 'refractive_index_data', 'quartz_refractive_index_info-eV.csv')
 			elif any(word in name for word in silicon_words):
 				path = os.path.join(os.path.dirname(__file__), 'refractive_index_data', 'silicon_refractive_index_info-eV.csv')
+			elif any(word in name for word in crystalline_quartz_words):
+				if '1951' in name:
+					path = os.path.join(os.path.dirname(__file__), 'refractive_index_data', 'crystalline_quartz(o)_1951-eV.csv')
+				else:
+					path = os.path.join(os.path.dirname(__file__), 'refractive_index_data', 'crystalline_quartz(o)_1999-eV.csv')
 			elif any(word in name for word in air_words):
 				path='custom'
 				n_custom = np.ones_like(self.energies)
@@ -184,9 +190,7 @@ class TransferMatrixModel:
 	def calc_rc(self):
 		target = self.tmm_calc(includesample=True)['R']
 		ref = self.tmm_calc(includesample=False)['R']
-		# import pdb; pdb.set_trace()
 		try:
-			# RC = (target - ref) / ref + self.params['offset'] + self.params['slope']*(self.energies - min(self.energies))
 			RC = (target - ref) / ref + self.calc_bg()
 		except KeyError:
 			RC = (target - ref) / ref
@@ -220,18 +224,30 @@ class TransferMatrixModel:
 		self.params = p 
 		return np.array(self.calc_rc())-np.array(self.spectrum) 
 
-	def fit(self, method='leastsq'):
+	def weighted_loss(self, p):
+		self.params = p 
+		return np.array(self.calc_rc())-np.array(self.spectrum) * self.weights
+
+	def fit(self, weights=None, method='leastsq'):
 		self.verify_params()
-		A = Minimizer(self.loss, self.params, nan_policy='omit')
+		if weights is not None:
+			self.weights = weights
+			A = Minimizer(self.weighted_loss, self.params, nan_policy='omit')
+		else:
+			A = Minimizer(self.loss, self.params, nan_policy='omit')
 		result = A.minimize(method=method)
 		return result
 	
 	def verify_params(self):
 		for param in self.params:
-			if self.params[param].min <= self.params[param].value <= self.params[param].max:
-				pass
-			else:
+			minval = self.params[param].min 
+			val = self.params[param].value 
+			maxval = self.params[param].max
+			if (minval == val or maxval == val) and val != np.inf:
 				raise ValueError('{} has an initial guess that is not within the bounds'.format(param))
+			else:
+				pass
+			
 
 
 
