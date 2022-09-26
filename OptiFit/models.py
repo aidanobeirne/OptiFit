@@ -72,14 +72,22 @@ class TransferMatrixModel:
 		self.peaks.append(name) # store the peaks in an instance attribute for easier access later
 
 	def add_background(self, func, params_dict, name='background'):
-		# self.background_pdict = {}
+		# Background NOT from sample
 		if name[-1] != '_':
 			name += '_'
 		for parameter, pdict in params_dict.items():
 			self.params.add('{}{}'.format(name, parameter), **pdict)
- 
 		self.background = func
 		self.background_name = name
+
+	def add_background_eps(self, func, params_dict, name='background_eps'):
+		# Background dielectric function of sample
+		if name[-1] != '_':
+			name += '_'
+		for parameter, pdict in params_dict.items():
+			self.params.add('{}{}'.format(name, parameter), **pdict)
+		self.background_eps = func
+		self.background_eps_name = name
 
 	def add_layer(self, name, d, n):
 		graphite_words = ['graphene', 'Graphene', 'graphite', 'Graphite', 'gr', 'Gr']
@@ -93,7 +101,7 @@ class TransferMatrixModel:
 		if 'full' in name:
 			n[1] = False # set vary to False in case it was accidentally set to True
 			if any(word in name for word in graphite_words):
-				path = os.path.join(os.path.dirname(__file__), 'refractive_index_data', 'graphite_refractive_index_info-eV.csv')
+				path = os.path.join(os.path.dirname(__file__), 'refractive_index_data', 'graphite(o)_refractive_index_info-eV.csv')
 			elif any(word in name for word in fused_silica_words):
 				path = os.path.join(os.path.dirname(__file__), 'refractive_index_data', 'quartz_refractive_index_info-eV.csv')
 			elif any(word in name for word in silicon_words):
@@ -109,7 +117,9 @@ class TransferMatrixModel:
 			elif any(word in name for word in hbn_words):
 				path = 'custom'
 				wls = 1240/self.energies
-				if '2019' in name:
+				if '2018' in name:
+					path = os.path.join(os.path.dirname(__file__), 'refractive_index_data', 'hBN_refractive_index_info_2018-eV.csv') # Phys. Status Solidi B, 256, 1800417 (2018) -- actually same as '2019' but imported
+				elif '2019' in name:
 					n_custom = np.sqrt(1+3.263*wls**2/(wls**2 - (164.4)**2)) + 1j*0 # Phys. Status Solidi B 2019, 256, 1800417 ----------------- much better in NIR
 				else:
 					n_custom = 2.23 - 6.9e-4*wls + 1j*0 # apparently in O.  Stenzel et al., Phys.  Status  Solidi  A (1996), but taken from Kim et al. JOSK 19, 503 (2015) -------------------- much better in VIS    
@@ -141,12 +151,12 @@ class TransferMatrixModel:
 		# always add the thicknesses to the parameters object
 		self.params.add('{}_d'.format(name), *d)
 
-	def get_nvals(self, includesample):
+	def get_nvals(self, includesample, exclude_background=False, exclude_peaks=False):
 		# Function retrieves the refractive indices, n from the params object, for every layer in the stack
 		nvals = []
 		for layer, value in self.layers.items():
 			if 'sample' in layer and includesample:
-				nvals.append(self.calc_n_sample())
+				nvals.append(self.calc_n_sample(exclude_background=exclude_background, exclude_peaks=exclude_peaks))
 			elif 'sample' in layer and not includesample:
 				continue
 			else:
@@ -170,31 +180,37 @@ class TransferMatrixModel:
 			dvals.append(self.params['{}_d'.format(layer)].value)
 		return dvals
 
-	def calc_n_sample(self):  
-		try:
-			eps_sample = 1 + (self.params['eps_sample_r']+ self.energies*self.params['eps_sample_r_slope']) + 1j*(self.params['eps_sample_i']+ self.energies*self.params['eps_sample_i_slope'])
-		except KeyError:
-			eps_sample = 1
+	def calc_n_sample(self, exclude_background=False, exclude_peaks=False):
 
-		for peak in self.peaks:
-			eps_sample += self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
-		n_sample = np.sqrt(eps_sample)
-		return n_sample
+		eps_sample = np.ones_like(self.energies)
+		if hasattr(self, 'background_eps') and not exclude_background:
+			eps_sample = eps_sample + self.calc_bg_eps()
 
-	def tmm_calc(self, includesample):
+		if hasattr(self, 'background') and not exclude_background:
+			eps_sample = eps_sample + self.calc_bg()
+		
+		if not exclude_peaks:
+			for peak in self.peaks:
+				eps_sample = eps_sample + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
+						
+		return np.sqrt(eps_sample)
+
+	def tmm_calc(self, includesample, exclude_background=False, exclude_peaks=False):
 		if includesample:
-			return coh_tmm('s', self.get_nvals(includesample=True), self.get_dvals(includesample=True), 0, 1240/self.energies)
+			return coh_tmm('s', self.get_nvals(includesample=True, exclude_background=exclude_background, exclude_peaks=exclude_peaks), self.get_dvals(includesample=True), 0, 1240/self.energies)
 		else:
-			return coh_tmm('s', self.get_nvals(includesample=False), self.get_dvals(includesample=False), 0, 1240/self.energies)
+			return coh_tmm('s', self.get_nvals(includesample=False, exclude_background=exclude_background, exclude_peaks=exclude_peaks), self.get_dvals(includesample=False), 0, 1240/self.energies)
 
-	def calc_rc(self):
-		target = self.tmm_calc(includesample=True)['R']
-		ref = self.tmm_calc(includesample=False)['R']
+	def calc_rc(self, exclude_background=False, exclude_peaks=False):
+		target = self.tmm_calc(includesample=True, exclude_background=exclude_background, exclude_peaks=exclude_peaks)['R']
+		ref = self.tmm_calc(includesample=False, exclude_background=exclude_background, exclude_peaks=exclude_peaks)['R']
 		try:
-			RC = (target - ref) / ref + self.calc_bg()
-		except KeyError:
+			if not exclude_background:
+				RC = (target - ref) / ref + self.calc_bg()
+			else:
+				RC = (target - ref) / ref
+		except AttributeError:
 			RC = (target - ref) / ref
-			print('ok')
 		return RC
 	
 	def calc_rc_resolved(self):
@@ -215,9 +231,17 @@ class TransferMatrixModel:
 	def calc_bg(self):
 		args = {}
 		for param in self.params:
-			if self.background_name in param:
+			if self.background_name in param and 'eps' not in param:
 				args[param.split('_')[1]] = self.params[param].value
 		bg = self.background(energies=self.energies, **args)
+		return  bg 
+
+	def calc_bg_eps(self):
+		args = {}
+		for param in self.params:
+			if self.background_eps_name in param:
+				args[param.split('_')[-1]] = self.params[param].value
+		bg_eps = self.background_eps(energies=self.energies, **args)
 		return  bg 
 
 	def loss(self, p):
@@ -228,13 +252,13 @@ class TransferMatrixModel:
 		self.params = p 
 		return np.array(self.calc_rc())-np.array(self.spectrum) * self.weights
 
-	def fit(self, weights=None, method='leastsq'):
-		self.verify_params()
+	def fit(self, weights=None, method='leastsq', **kwargs):
+		# self.verify_params()
 		if weights is not None:
 			self.weights = weights
-			A = Minimizer(self.weighted_loss, self.params, nan_policy='omit')
+			A = Minimizer(self.weighted_loss, self.params, nan_policy='omit', **kwargs)
 		else:
-			A = Minimizer(self.loss, self.params, nan_policy='omit')
+			A = Minimizer(self.loss, self.params, nan_policy='omit', **kwargs)
 		result = A.minimize(method=method)
 		return result
 	
@@ -247,9 +271,12 @@ class TransferMatrixModel:
 				raise ValueError('{} has an initial guess that is not within the bounds'.format(param))
 			else:
 				pass
+
+	def update_params_initial_guess(self):
+		for pname in self.params:
+			self.params[pname].init_value = self.params[pname].value
+
 			
-
-
 
 class CompositeModel():
 	"""Used to fit PL data with a variable number of peaks
