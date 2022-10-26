@@ -71,6 +71,27 @@ class TransferMatrixModel:
 		self.params.add('{}_w'.format(name), *broadening)
 		self.peaks.append(name) # store the peaks in an instance attribute for easier access later
 
+	def complex_voigt(self, x, a, x0, w, broadening):
+		lor = self.complex_lorentzian(x, a, x0, w)
+		g =np.exp((-(x - x0)**2) / (2 * broadening**2)) / broadening / np.sqrt(2 * np.pi) +1j * np.zeros_like(x)
+		voigt = np.convolve(g, lor, mode = 'full')
+		# chop off signal to be correct size
+		center = abs(np.array(x) - x0).argmin()
+		cutoff_min = int(center)
+		cutoff_max = int(center + len(x))
+		voigt_clipped = voigt[cutoff_min : cutoff_max]
+		return voigt_clipped
+
+	def add_voigt(self, name, amplitude, resonant_energy, broadening, inhomogeneous_broadening):
+		if 'voigt' not in name:
+			name = name + '_voigt'
+		self.params.add('{}_a'.format(name), *amplitude)
+		self.params.add('{}_x0'.format(name), *resonant_energy)
+		self.params.add('{}_w'.format(name), *broadening)
+		self.params.add('{}_broadening'.format(name), *inhomogeneous_broadening)
+	
+		self.peaks.append(name)
+
 	def add_background(self, func, params_dict, name='background'):
 		# Background NOT from sample
 		if name[-1] != '_':
@@ -191,7 +212,15 @@ class TransferMatrixModel:
 		
 		if not exclude_peaks:
 			for peak in self.peaks:
-				eps_sample = eps_sample + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
+				if 'voigt' in peak:
+					eps_sample = eps_sample + self.complex_voigt(self.energies, 
+																self.params['{}_a'.format(peak)].value, 
+																self.params['{}_x0'.format(peak)].value, 
+																self.params['{}_w'.format(peak)].value, 
+																self.params['{}_broadening'.format(peak)].value
+																)
+				else:
+					eps_sample = eps_sample + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
 						
 		return np.sqrt(eps_sample)
 
@@ -217,7 +246,12 @@ class TransferMatrixModel:
 		RC_dict = {}
 		RC_dict['total'] = self.calc_rc()
 		for peak in self.peaks:
-			n_sample = np.sqrt(1 + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value))
+			n_sample = np.sqrt(1 + self.complex_lorentzian(self.energies, 
+															self.params['{}_a'.format(peak)].value, 
+															self.params['{}_x0'.format(peak)].value, 
+															self.params['{}_w'.format(peak)].value
+															))
+
 			target_nvals = self.get_nvals(includesample=True)
 			# find and replace the sample n with the n containing only one peak
 			for idx, key in enumerate(self.layers.keys()):
@@ -242,11 +276,18 @@ class TransferMatrixModel:
 			if self.background_eps_name in param:
 				args[param.split('_')[-1]] = self.params[param].value
 		bg_eps = self.background_eps(energies=self.energies, **args)
-		return  bg 
+		return  bg_eps 
 
 	def loss(self, p):
 		self.params = p 
-		return np.array(self.calc_rc())-np.array(self.spectrum) 
+		voigt = False
+		for peak in self.peaks:
+			if 'voigt' in peak:
+				voigt = True
+		if voigt: #chop off part of the spectrum due to convolution artifact
+			return (np.array(self.calc_rc())-np.array(self.spectrum))[int(len(self.spectrum) / 11) : int(10 * len(self.spectrum) / 11)]
+		else:
+			return np.array(self.calc_rc())-np.array(self.spectrum) 
 
 	def weighted_loss(self, p):
 		self.params = p 
