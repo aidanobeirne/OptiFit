@@ -83,13 +83,32 @@ class TransferMatrixModel:
 		return voigt_clipped
 
 	def add_voigt(self, name, amplitude, resonant_energy, broadening, inhomogeneous_broadening):
-		if 'voigt' not in name:
+		if '_voigt' not in name:
 			name = name + '_voigt'
 		self.params.add('{}_a'.format(name), *amplitude)
 		self.params.add('{}_x0'.format(name), *resonant_energy)
 		self.params.add('{}_w'.format(name), *broadening)
 		self.params.add('{}_broadening'.format(name), *inhomogeneous_broadening)
-	
+		self.peaks.append(name)
+
+	def psuedovoigt(self, x, a, x0, w, mixing):
+		## weighted sum of gaussian and lorentzian
+		denominator = (x0**2 - x**2)**2 + (x**2 * w**2)
+		real = (x0**2 - x**2) / denominator
+		imag = x * w / denominator
+		sigma = w / (2 * np.sqrt(2*np.log(2)))
+		gauss = np.exp(-(x - x0)**2 / (2 * sigma**2))
+		weighted_sum_real = mixing * gauss +(1 - mixing) * real
+		weighted_sum_imag = mixing * gauss +(1 - mixing) * imag
+		return a * (weighted_sum_real + 1j * weighted_sum_imag)
+
+	def add_psuedovoigt(self, name, amplitude, resonant_energy, broadening, mixing):
+		if '_psuedovoigt' not in name:
+			name = name + '_psuedovoigt'
+		self.params.add('{}_a'.format(name), *amplitude)
+		self.params.add('{}_x0'.format(name), *resonant_energy)
+		self.params.add('{}_w'.format(name), *broadening)
+		self.params.add('{}_mixing'.format(name), *mixing)
 		self.peaks.append(name)
 
 	def add_background(self, func, params_dict, name='background'):
@@ -212,17 +231,51 @@ class TransferMatrixModel:
 		
 		if not exclude_peaks:
 			for peak in self.peaks:
-				if 'voigt' in peak:
+				if '_voigt' in peak:
 					eps_sample = eps_sample + self.complex_voigt(self.energies, 
 																self.params['{}_a'.format(peak)].value, 
 																self.params['{}_x0'.format(peak)].value, 
 																self.params['{}_w'.format(peak)].value, 
 																self.params['{}_broadening'.format(peak)].value
 																)
+				elif 'psuedovoigt' in peak:
+					eps_sample = eps_sample + self.psuedovoigt(self.energies, 
+																self.params['{}_a'.format(peak)].value, 
+																self.params['{}_x0'.format(peak)].value, 
+																self.params['{}_w'.format(peak)].value, 
+																self.params['{}_mixing'.format(peak)].value
+																)
 				else:
 					eps_sample = eps_sample + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
 						
 		return np.sqrt(eps_sample)
+
+	def calc_n_sample_resolved(self, exclude_background=False):
+		eps_dict = {}
+		eps_dict['total'] = self.calc_n_sample()
+		for peak in self.peaks:
+			eps_sample = np.ones_like(self.energies)
+			if '_voigt' in peak:
+				eps_sample = eps_sample + self.complex_voigt(self.energies, 
+															self.params['{}_a'.format(peak)].value, 
+															self.params['{}_x0'.format(peak)].value, 
+															self.params['{}_w'.format(peak)].value, 
+															self.params['{}_broadening'.format(peak)].value
+															)
+			elif 'psuedovoigt' in peak:
+				eps_sample = eps_sample + self.psuedovoigt(self.energies, 
+															self.params['{}_a'.format(peak)].value, 
+															self.params['{}_x0'.format(peak)].value, 
+															self.params['{}_w'.format(peak)].value, 
+															self.params['{}_mixing'.format(peak)].value
+															)
+			else:
+				eps_sample = eps_sample + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
+			if not exclude_background:
+				eps_sample = eps_sample + self.calc_bg()
+			eps_dict[peak] = eps_sample
+		return eps_dict
+
 
 	def tmm_calc(self, includesample, exclude_background=False, exclude_peaks=False):
 		if includesample:
@@ -243,15 +296,28 @@ class TransferMatrixModel:
 		return RC
 	
 	def calc_rc_resolved(self):
+		eps_sample = np.ones_like(self.energies)
 		RC_dict = {}
 		RC_dict['total'] = self.calc_rc()
 		for peak in self.peaks:
-			n_sample = np.sqrt(1 + self.complex_lorentzian(self.energies, 
+			if '_voigt' in peak:
+				eps_sample = eps_sample + self.complex_voigt(self.energies, 
 															self.params['{}_a'.format(peak)].value, 
 															self.params['{}_x0'.format(peak)].value, 
-															self.params['{}_w'.format(peak)].value
-															))
+															self.params['{}_w'.format(peak)].value, 
+															self.params['{}_broadening'.format(peak)].value
+															)
+			elif 'psuedovoigt' in peak:
+				eps_sample = eps_sample + self.psuedovoigt(self.energies, 
+															self.params['{}_a'.format(peak)].value, 
+															self.params['{}_x0'.format(peak)].value, 
+															self.params['{}_w'.format(peak)].value, 
+															self.params['{}_mixing'.format(peak)].value
+															)
+			else:
+				eps_sample = eps_sample + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
 
+			n_sample = np.sqrt(eps_sample)
 			target_nvals = self.get_nvals(includesample=True)
 			# find and replace the sample n with the n containing only one peak
 			for idx, key in enumerate(self.layers.keys()):
@@ -282,7 +348,7 @@ class TransferMatrixModel:
 		self.params = p 
 		voigt = False
 		for peak in self.peaks:
-			if 'voigt' in peak:
+			if '_voigt' in peak:
 				voigt = True
 		if voigt: #chop off part of the spectrum due to convolution artifact
 			return (np.array(self.calc_rc())-np.array(self.spectrum))[int(len(self.spectrum) / 11) : int(10 * len(self.spectrum) / 11)]
