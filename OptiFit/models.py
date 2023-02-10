@@ -382,9 +382,21 @@ class TransferMatrixModel:
 	def update_params_initial_guess(self):
 		for pname in self.params:
 			self.params[pname].init_value = self.params[pname].value
+	
+	def plot_n_of_every_layer(self):
+		ns = self.get_nvals(includesample=False)
+		fig, ax = plt.subplots(2,1)
+		ax[0].set_title("Re[$\epsilon$]")
+		ax[1].set_title("Im[$\epsilon$]")
+		layers = [i for i in self.layers.keys() if 'sample' not in i]
+		for layer, n, in zip(layers, ns):
+			ax[0].plot(self.energies, np.real(n), label=str(layer))
+			ax[1].plot(self.energies, np.imag(n), label=str(layer))
+		ax[0].legend()
+		ax[1].legend()
+
 
 			
-
 class CompositeModel():
 	"""Used to fit PL data with a variable number of peaks
 	"""
