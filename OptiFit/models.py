@@ -251,8 +251,8 @@ class TransferMatrixModel:
 		return np.sqrt(eps_sample)
 
 	def calc_n_sample_resolved(self, exclude_background=False):
-		eps_dict = {}
-		eps_dict['total'] = self.calc_n_sample()
+		ns_dict = {}
+		ns_dict['total'] = self.calc_n_sample()
 		for peak in self.peaks:
 			eps_sample = np.ones_like(self.energies)
 			if '_voigt' in peak:
@@ -273,8 +273,8 @@ class TransferMatrixModel:
 				eps_sample = eps_sample + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
 			if not exclude_background:
 				eps_sample = eps_sample + self.calc_bg()
-			eps_dict[peak] = eps_sample
-		return eps_dict
+			ns_dict[peak] = np.sqrt(eps_sample)
+		return ns_dict
 
 
 	def tmm_calc(self, includesample, exclude_background=False, exclude_peaks=False):
@@ -296,26 +296,25 @@ class TransferMatrixModel:
 		return RC
 	
 	def calc_rc_resolved(self):
-		eps_sample = np.ones_like(self.energies)
 		RC_dict = {}
 		RC_dict['total'] = self.calc_rc()
 		for peak in self.peaks:
 			if '_voigt' in peak:
-				eps_sample = eps_sample + self.complex_voigt(self.energies, 
+				eps_sample = np.ones_like(self.energies) + self.complex_voigt(self.energies, 
 															self.params['{}_a'.format(peak)].value, 
 															self.params['{}_x0'.format(peak)].value, 
 															self.params['{}_w'.format(peak)].value, 
 															self.params['{}_broadening'.format(peak)].value
 															)
 			elif 'psuedovoigt' in peak:
-				eps_sample = eps_sample + self.psuedovoigt(self.energies, 
+				eps_sample = np.ones_like(self.energies) + self.psuedovoigt(self.energies, 
 															self.params['{}_a'.format(peak)].value, 
 															self.params['{}_x0'.format(peak)].value, 
 															self.params['{}_w'.format(peak)].value, 
 															self.params['{}_mixing'.format(peak)].value
 															)
 			else:
-				eps_sample = eps_sample + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
+				eps_sample = np.ones_like(self.energies) + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
 
 			n_sample = np.sqrt(eps_sample)
 			target_nvals = self.get_nvals(includesample=True)
