@@ -226,8 +226,8 @@ class TransferMatrixModel:
 		if hasattr(self, 'background_eps') and not exclude_background:
 			eps_sample = eps_sample + self.calc_bg_eps()
 
-		if hasattr(self, 'background') and not exclude_background:
-			eps_sample = eps_sample + self.calc_bg()
+		# if hasattr(self, 'background') and not exclude_background:
+		# 	eps_sample = eps_sample + self.calc_bg()
 		
 		if not exclude_peaks:
 			for peak in self.peaks:
@@ -365,8 +365,8 @@ class TransferMatrixModel:
 			A = Minimizer(self.weighted_loss, self.params, nan_policy='omit', **kwargs)
 		else:
 			A = Minimizer(self.loss, self.params, nan_policy='omit', **kwargs)
-		result = A.minimize(method=method)
-		return result
+		self.result = A.minimize(method=method)
+		return self.result
 	
 	def verify_params(self):
 		for param in self.params:
