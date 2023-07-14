@@ -345,14 +345,21 @@ class TransferMatrixModel:
 
 	def loss(self, p):
 		self.params = p 
-		voigt = False
-		for peak in self.peaks:
-			if '_voigt' in peak:
-				voigt = True
-		if voigt: #chop off part of the spectrum due to convolution artifact
-			return (np.array(self.calc_rc())-np.array(self.spectrum))[int(len(self.spectrum) / 11) : int(10 * len(self.spectrum) / 11)]
-		else:
-			return np.array(self.calc_rc())-np.array(self.spectrum) 
+		# voigt = False
+		# for peak in self.peaks:
+		# 	if '_voigt' in peak:
+		# 		voigt = True
+		# if voigt: #chop off part of the spectrum due to convolution artifact
+		# 	return (np.array(self.calc_rc())-np.array(self.spectrum))[int(len(self.spectrum) / 11) : int(10 * len(self.spectrum) / 11)]
+		# else:
+		return np.array(self.calc_rc())-np.array(self.spectrum) 
+	
+	def loss_derivative(self, p):
+		self.params = p
+		# Compute the derivatives
+		deriv_calc_rc = np.gradient(self.calc_rc(), self.energies)
+		deriv_spectrum = np.gradient(self.spectrum, self.energies)
+		return deriv_calc_rc - deriv_spectrum
 
 	def weighted_loss(self, p):
 		self.params = p 
@@ -365,6 +372,11 @@ class TransferMatrixModel:
 			A = Minimizer(self.weighted_loss, self.params, nan_policy='omit', **kwargs)
 		else:
 			A = Minimizer(self.loss, self.params, nan_policy='omit', **kwargs)
+		self.result = A.minimize(method=method)
+		return self.result
+
+	def fit_derivative(self, method='leastsq', **kwargs):
+		A = Minimizer(self.loss_derivative, self.params, nan_policy='omit', **kwargs)
 		self.result = A.minimize(method=method)
 		return self.result
 	
@@ -394,7 +406,87 @@ class TransferMatrixModel:
 		ax[0].legend()
 		ax[1].legend()
 
+	def plot_fit_result(self, **kw):
+		self.fit_opt = {  # default options
+			'derivative': False, 
+			'eps_r': True,
+			'title':            'Sample',  # plot title
+		}
+		for key, value in kw.items():
+			self.fit_opt[key] = value
 
+		if self.fit_opt['derivative'] == True:
+			spec = np.gradient(self.spectrum, self.energies)
+			spec_fit = np.gradient(self.calc_rc(), self.energies)
+		else:
+			spec = self.spectrum
+			spec_fit = self.calc_rc()
+
+		fig, ax = plt.subplots(2, 1)
+		ax[0].plot(self.energies, spec, marker='.', markersize=2,
+				linestyle="None", color='0', label='Raw Data')
+		ax[0].plot(self.energies, spec_fit, color='C0', label='Fit Data')
+		ax[0].set_title(self.fit_opt['title'])
+		ax[0].set_ylabel('$\Delta R/R$')
+		ax[0].legend()
+		eps = self.calc_n_sample(exclude_background=True)**2
+		ax[1].plot(self.energies, np.imag(eps),
+				color='C1', label='$\epsilon_i$ of fit')
+		if self.fit_opt['eps_r']:
+			ax[1].plot(self.energies, np.real(eps),
+					color='C2', label='$\epsilon_r$ of fit')
+		for peak, value in self.calc_n_sample_resolved(exclude_background=False).items():
+			bg = np.zeros_like(self.energies)
+			if self.background_name in peak:
+				bg = value
+		ns = self.calc_n_sample_resolved(exclude_background=True)
+		for n, (peak, value) in enumerate(ns.items()):
+			if 'total' in peak:
+				continue
+			ax[1].plot(self.energies, np.imag(value**2) + np.imag(bg**2), linestyle='dashed', color=f'C{n+2}', label=peak)
+			ax[1].fill_between(self.energies, np.imag(value**2) + np.imag(bg**2), color=f'C{n+2}', alpha=0.25)
+		ax[1].legend()
+		ax[1].set_xlabel('Energy (eV)')
+
+class GuessPlot:
+	def __init__(self):
+		self.model = None
+		self.guess_fig_id = None
+		self.spec = None
+		self.spec_fit = None
+
+	def plot_guess(self, **kw):
+		self.guess_opt = {  # default options
+			'derivative': False, 
+		}
+		for key, value in kw.items():
+			self.guess_opt[key] = value
+		if self.guess_opt['derivative'] == True:
+			self.spec = np.gradient(self.model.spectrum, self.model.energies)
+			self.spec_fit = np.gradient(self.model.calc_rc(), self.model.energies)
+		else:
+			self.spec = self.model.spectrum
+			self.spec_fit = self.model.calc_rc()
+			
+
+		if  self.guess_fig_id is not None and plt.fignum_exists(self.guess_fig_id):  # If the figure exists and was not closed
+			# print('already exists')
+			self.guess_fig = plt.figure(self.guess_fig_id)  # Get the existing figure
+			self.guess_raw_line.set_ydata(self.spec)  # Update the data of the line object
+			self.guess_pred_line.set_ydata(self.spec_fit)
+		else:  # If the figure does not exist or was closed, create it
+			# print('fig doesnt exist or was exited')
+			self.guess_fig, self.guess_ax = plt.subplots()
+			self.guess_fig_id = self.guess_fig.number  # Save the figure ID
+			self.guess_raw_line, = self.guess_ax.plot(self.model.energies, self.spec, 'k+', label='spectrum')
+			self.guess_pred_line, = self.guess_ax.plot(self.model.energies, self.spec_fit, 'r', label='initial guess')
+
+		self.guess_ax.relim()
+		self.guess_ax.autoscale_view(True, True, True)
+		plt.draw()
+		plt.pause(0.01)
+
+	
 			
 class CompositeModel():
 	"""Used to fit PL data with a variable number of peaks
