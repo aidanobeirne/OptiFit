@@ -4,8 +4,10 @@ import matplotlib.pyplot as plt
 from more_itertools import last
 import numpy as np
 import csv
+import inspect
 from solcore.absorption_calculator.tmm_core_vec import coh_tmm
 import os
+from scipy.integrate import quad_vec
 import copy
 
 
@@ -48,71 +50,162 @@ def import_rinfo(path):
 			return energies, n, k
 		except IndexError:
 			return energies, n, 0*np.ones_like(n)
+
 class TransferMatrixModel:
-	""" Transfer Matrix model Class
+	""" Transfer Matrix Model used to fit to reflectance contrast data from multilayer thin flims
 	"""
 	def __init__(self, spectrum, energies):
+		"""Constructor for TMM model
+		Args:
+			spectrum (array or list): raw data spectrum
+			energies (array or list): correspoinding energy domain
+		"""
 		self.spectrum = spectrum
 		self.energies = energies
 		self.params = Parameters()
 		self.layers = {}
-		self.peaks = []
-	
-	def complex_lorentzian(self, x, a, x0, w):
-		denominator=(x0**2-x**2)**2+(x**2*w**2)
-		real=a*(x0**2-x**2)/denominator
-		imag=x*w*a/denominator
-		lor=real+1j*imag
+		self.peaks = {}
+		
+	@staticmethod
+	def lorentzian(E, f, E0, gamma):
+		"""Lorentzian spectral line
+
+		Args:
+			E (array): energies of spectrum
+			f (float): oscillator strength
+			E0 (float): center resonance
+			gamma (float): broadening 
+
+		Returns:
+			complex array: real and imaginary parts of the complex Lorentzian 
+		"""
+		denominator = (E0**2 - E**2)**2 + (E**2*gamma**2)
+		real = f*(E0**2 - E**2) / denominator
+		imag = E*gamma*f / denominator
+		lor = real + 1j*imag
 		return lor
+	
+	@staticmethod
+	def asymmetric_lorentzian(E, E0, gamma1, gamma2, f):
+		"""Asymmetric Lorentzian spectral line (also called a split Lorentzian). The broadening factor is allowed to vary on either side
+		of the center resonance
 
-	def add_lorentzian(self, name, amplitude, resonant_energy, broadening):
-		self.params.add('{}_a'.format(name), *amplitude)
-		self.params.add('{}_x0'.format(name), *resonant_energy)
-		self.params.add('{}_w'.format(name), *broadening)
-		self.peaks.append(name) # store the peaks in an instance attribute for easier access later
+		Args:
+			E (array): energies of spectrum
+			E0 (float): center resonance
+			gamma1 (float): broadening below center resonance
+			gamma2 (float): broadening above center resonance
+			f (float): oscillator strength
 
-	def complex_voigt(self, x, a, x0, w, broadening):
-		lor = self.complex_lorentzian(x, a, x0, w)
-		g =np.exp((-(x - x0)**2) / (2 * broadening**2)) / broadening / np.sqrt(2 * np.pi) +1j * np.zeros_like(x)
-		voigt = np.convolve(g, lor, mode = 'full')
-		# chop off signal to be correct size
-		center = abs(np.array(x) - x0).argmin()
-		cutoff_min = int(center)
-		cutoff_max = int(center + len(x))
-		voigt_clipped = voigt[cutoff_min : cutoff_max]
-		return voigt_clipped
 
-	def add_voigt(self, name, amplitude, resonant_energy, broadening, inhomogeneous_broadening):
-		if '_voigt' not in name:
-			name = name + '_voigt'
-		self.params.add('{}_a'.format(name), *amplitude)
-		self.params.add('{}_x0'.format(name), *resonant_energy)
-		self.params.add('{}_w'.format(name), *broadening)
-		self.params.add('{}_broadening'.format(name), *inhomogeneous_broadening)
-		self.peaks.append(name)
+		Returns:
+			complex array: real and imaginary parts of the asymmetric Lorentzian 
 
-	def psuedovoigt(self, x, a, x0, w, mixing):
-		## weighted sum of gaussian and lorentzian
-		denominator = (x0**2 - x**2)**2 + (x**2 * w**2)
-		real = (x0**2 - x**2) / denominator
-		imag = x * w / denominator
-		sigma = w / (2 * np.sqrt(2*np.log(2)))
-		gauss = np.exp(-(x - x0)**2 / (2 * sigma**2))
+		"""
+		result = np.empty_like(E, dtype=complex)
+		condition = E <= E0
+		E1 = E[condition]
+		lor1 = TransferMatrixModel.lorentzian(E1, 1, E0, gamma1)
+		normalization1 = abs(TransferMatrixModel.lorentzian(E0, 1, E0, gamma1))
+		result[condition] = lor1 / normalization1
+		E2 = E[~condition]
+		lor2 = TransferMatrixModel.lorentzian(E2, 1, E0, gamma2)
+		normalization2 = abs(TransferMatrixModel.lorentzian(E0, 1, E0, gamma2))
+		result[~condition] = lor2 / normalization2
+		result = f * result
+		return result
+
+	@staticmethod
+	def convd_lorentzian(E, f, E0, gamma, conv_fn, **kwargs):
+		"""Inhomogeneously broadened Lorentzian spectral line. A Lorentzian function is convolved with the user-input broadening function.
+		The user should ensure that the broadening function is normalized. Note that there will be convolution artefacts at the boundary.
+
+		Args:
+			E (array): energies of spectrum
+			f (float): oscillator strength
+			E0 (float): center resonance
+			gamma (float): broadening 
+			conv_fn (function): function to convolve the Lorentzian with (e.g. a gaussian)
+			kwargs (dict): dictionary of keyword arguments that correspond to the conv_fn
+
+		Returns:
+			complex array: real and imaginary parts of the inhomogeneously broadened Lorentzian 
+
+		"""
+		L = TransferMatrixModel.lorentzian(E, f, E0, gamma)
+		conv_fn_array = conv_fn(E, **kwargs)
+		real = np.convolve(np.real(L), conv_fn_array, mode='same')
+		imag = np.convolve(np.imag(L), conv_fn_array, mode='same')
+		return real + 1j * imag
+		
+	@staticmethod
+	def psuedovoigt(E, f, E0, gamma, mixing):
+		"""Psuedovoigt spectral line. Instead of doing a full convolution between a Gaussian and Lorentzian, this function
+		is a weighted sum of a Gaussian and Lorentzian.
+
+		Args:
+			E (array): energies of spectrum
+			f (float): oscillator strength
+			E0 (float): center resonance
+			gamma (float): broadening 
+			mixing (float): number between 0 (completely Lorentzian) and 1 (completely Gaussian)
+
+		Returns:
+			complex array: real and imaginary parts of the psuedovoigt
+
+		"""
+		denominator = (E0**2 - E**2)**2 + (E**2 * gamma**2)
+		real = (E0**2 - E**2) / denominator
+		imag = E * gamma / denominator
+		sigma = gamma / (2 * np.sqrt(2*np.log(2)))
+		gauss = np.exp(-(E - E0)**2 / (2 * sigma**2))
 		weighted_sum_real = mixing * gauss +(1 - mixing) * real
 		weighted_sum_imag = mixing * gauss +(1 - mixing) * imag
-		return a * (weighted_sum_real + 1j * weighted_sum_imag)
+		return f * (weighted_sum_real + 1j * weighted_sum_imag)
+	
+	def	add_resonance(self, peak_name, fn_name, **pars):
+		"""Add a resonance to the model
 
-	def add_psuedovoigt(self, name, amplitude, resonant_energy, broadening, mixing):
-		if '_psuedovoigt' not in name:
-			name = name + '_psuedovoigt'
-		self.params.add('{}_a'.format(name), *amplitude)
-		self.params.add('{}_x0'.format(name), *resonant_energy)
-		self.params.add('{}_w'.format(name), *broadening)
-		self.params.add('{}_mixing'.format(name), *mixing)
-		self.peaks.append(name)
+		Args:
+			peak_name (str): Name of resonance, e.g. '1s exciton'
+			fn_name (str): Name of function used to model resonance, e.g. 'lorentzian'. Look at all of the static methods to see your options
+			pars (dict): Dictionary of parameter objects. See LMFIT documentation: https://lmfit.github.io/lmfit-py/parameters.html#
+						Keys are arguments to correwsponding function defined by fn_name, values are lmfit parameter lists
+						One entry of the pars dictionary could be, for example: 
+						 							'E0': [value, vary, min, max]
+						where 'value' is the initial guess, 'vary' (bool) is whether or not it should be treated as a fit parameter, 
+						and 'min' and 'max' are the bounds of the parameter.
+
+		"""
+		if fn_name not in [func for func in dir(self) if callable(getattr(self, func)) and not func.startswith("__")]:
+			raise ValueError(f"The function'{fn_name}' is not found.")
+		else:
+			function = getattr(self, fn_name)
+			args = list(inspect.signature(function).parameters)[1:]
+
+			for arg in args:
+				if arg not in pars.keys() and 'kwarg' not in arg:
+					raise ValueError(f"Parameter '{arg}' is missing.")
+	
+			# Add parameters to the params dictionary
+		for key, value in pars.items():
+			if 'convd' in fn_name and 'conv_fn' in key:
+				self.conv_fn = value
+				continue
+			self.params.add(f'{peak_name}_{key}', *value)
+		
+		self.peaks[peak_name] = function
 
 	def add_background(self, func, params_dict, name='background'):
-		# Background NOT from sample
+		"""Add a background to the RC spectrum. This is, stricly speaking, bad practice since the resulting model is no longer
+			KKR constrained (i.e. one could violate causality with an appropriately whacky background function). However, this can 
+			sometimes be necessary if the RC spectrum has some artefacts (e.g. the reference spectrum is bad)
+
+		Args:
+			func (function): user-defined background function
+			params_dict (dict): dictionary of keyword arguments that correspond to the background function
+			name (str, optional): background name. Defaults to 'background'.
+		"""
 		if name[-1] != '_':
 			name += '_'
 		for parameter, pdict in params_dict.items():
@@ -121,7 +214,14 @@ class TransferMatrixModel:
 		self.background_name = name
 
 	def add_background_eps(self, func, params_dict, name='background_eps'):
-		# Background dielectric function of sample
+		"""Add a background function to the dielectric function of the sample. Again this is generally 
+		   bad practice (see add_background method), but can sometimes be helfpul.
+
+		Args:
+			func (function): user-defined background dielectric function
+			params_dict (dict): dictionary of keyword arguments that correspond to the background dielectric function
+			name (str, optional): Background name. Defaults to 'background_eps'.
+		"""
 		if name[-1] != '_':
 			name += '_'
 		for parameter, pdict in params_dict.items():
@@ -130,6 +230,15 @@ class TransferMatrixModel:
 		self.background_eps_name = name
 
 	def add_layer(self, name, d, n):
+		"""Add a layer in the mutlilayer stack. If 'full' is in the name of the layer and any of the keywords (defined in the 'words' lists below)
+		   are in the name of the layer, then the parameter list corresponding to 'n' will be ignored (but should still be included when using the function). 
+		   In this case, the code will import dielectric functions from known publications and interpolate them across the energy domain.
+
+		Args:
+			name (str): Name of layer (e.g. 'hBN')
+			d (list): LMFIT parameter list corresponding to the thickness of each layer (see add_resonance method or LMFIT documentation)
+			n (_type_): LMFIT parameter list corresponding to the refractive index of each layer (see add_resonance method or LMFIT documentation)
+		"""
 		graphite_words = ['graphene', 'Graphene', 'graphite', 'Graphite', 'gr', 'Gr']
 		fused_silica_words = ['SiO2', 'sio2', 'oxide', 'silica']
 		crystalline_quartz_words = ['quartz', 'Quartz']
@@ -192,6 +301,17 @@ class TransferMatrixModel:
 		self.params.add('{}_d'.format(name), *d)
 
 	def get_nvals(self, includesample, exclude_background=False, exclude_peaks=False):
+		"""Retrieves the complex refractive indices of each layer as a function of energy
+
+		Args:
+			includesample (Bool): Whether or not to include the sample in the calculation (should be 'False' for reference spectrum)
+			exclude_background (bool, optional): Whether or not to exclude any user-defined background function. Defaults to False.
+			exclude_peaks (bool, optional): Whether or not to exclude the resonances (this allows one to visualize only the contribution from 
+											a user-defined backgroun). Defaults to False.
+
+		Returns:
+			array of complex floats: array of refractive indices for each layer
+		"""
 		# Function retrieves the refractive indices, n from the params object, for every layer in the stack
 		nvals = []
 		for layer, value in self.layers.items():
@@ -212,7 +332,14 @@ class TransferMatrixModel:
 		return nvals
 
 	def get_dvals(self, includesample):
-		# Function retrieves the thicknesses, d from the params object, for every layer in the stack
+		"""Retrives the thicknesses for each layer in the stack
+
+		Args:
+			includesample (Bool): Whether or not to include the sample in the calculation (should be 'False' for reference spectrum)
+
+		Returns:
+			array of floats: array of thicknesses
+		"""
 		dvals = []
 		for layer in self.layers.keys():
 			if 'sample' in layer and not includesample:
@@ -221,69 +348,78 @@ class TransferMatrixModel:
 		return dvals
 
 	def calc_n_sample(self, exclude_background=False, exclude_peaks=False):
+		"""Calculates the complex refractive index of the sample for the current model
 
-		eps_sample = np.ones_like(self.energies)
+		Args:
+			exclude_background (bool, optional): Whether or not to exclude any user-defined background function. Defaults to False.
+			exclude_peaks (bool, optional): Whether or not to exclude the resonances (this allows one to visualize only the contribution from 
+											a user-defined backgroun). Defaults to False.
+
+		Returns:
+			array of complex floats: The complex refractive index of the sample
+		"""
 		if hasattr(self, 'background_eps') and not exclude_background:
 			eps_sample = eps_sample + self.calc_bg_eps()
+		else:
+			eps_sample = np.ones_like(self.energies, complex)
 
-		# if hasattr(self, 'background') and not exclude_background:
-		# 	eps_sample = eps_sample + self.calc_bg()
-		
 		if not exclude_peaks:
-			for peak in self.peaks:
-				if '_voigt' in peak:
-					eps_sample = eps_sample + self.complex_voigt(self.energies, 
-																self.params['{}_a'.format(peak)].value, 
-																self.params['{}_x0'.format(peak)].value, 
-																self.params['{}_w'.format(peak)].value, 
-																self.params['{}_broadening'.format(peak)].value
-																)
-				elif 'psuedovoigt' in peak:
-					eps_sample = eps_sample + self.psuedovoigt(self.energies, 
-																self.params['{}_a'.format(peak)].value, 
-																self.params['{}_x0'.format(peak)].value, 
-																self.params['{}_w'.format(peak)].value, 
-																self.params['{}_mixing'.format(peak)].value
-																)
-				else:
-					eps_sample = eps_sample + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
-						
+			for peakname, peakfunction in self.peaks.items():
+				eps_sample += self.evaluate_resonance(peakname, peakfunction)
 		return np.sqrt(eps_sample)
 
+
 	def calc_n_sample_resolved(self, exclude_background=False):
+		"""Calculates the refractive index of the sample for every resonance individually
+
+		Args:
+			exclude_background (bool, optional): Whether or not to exclude any user-defined background function. Defaults to False.
+
+
+		Returns:
+			dict: dictionary of refractive indices for each resonance. Keys are peak names, values are refractive indices
+		"""
 		ns_dict = {}
 		ns_dict['total'] = self.calc_n_sample()
-		for peak in self.peaks:
-			eps_sample = np.ones_like(self.energies)
-			if '_voigt' in peak:
-				eps_sample = eps_sample + self.complex_voigt(self.energies, 
-															self.params['{}_a'.format(peak)].value, 
-															self.params['{}_x0'.format(peak)].value, 
-															self.params['{}_w'.format(peak)].value, 
-															self.params['{}_broadening'.format(peak)].value
-															)
-			elif 'psuedovoigt' in peak:
-				eps_sample = eps_sample + self.psuedovoigt(self.energies, 
-															self.params['{}_a'.format(peak)].value, 
-															self.params['{}_x0'.format(peak)].value, 
-															self.params['{}_w'.format(peak)].value, 
-															self.params['{}_mixing'.format(peak)].value
-															)
-			else:
-				eps_sample = eps_sample + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
-			if not exclude_background:
+		for peakname, peakfunction in self.peaks.items():
+			eps_sample = np.ones_like(self.energies, complex)
+			eps_sample += self.evaluate_resonance(peakname, peakfunction)
+
+			if not exclude_background and  hasattr(self, 'background_name') :
 				eps_sample = eps_sample + self.calc_bg()
-			ns_dict[peak] = np.sqrt(eps_sample)
+
+			ns_dict[peakname] = np.sqrt(eps_sample)
+
 		return ns_dict
 
 
 	def tmm_calc(self, includesample, exclude_background=False, exclude_peaks=False):
+		"""Performs the TMM caluclation using the solcore package: https://www.solcore.solar/ . This returns the reflected wave power of light
+		normally incident upon the multilayer stack
+
+		Args:
+			includesample (bool): include sample?
+			exclude_background (bool, optional): exclude background? Defaults to False.
+			exclude_peaks (bool, optional): exclude resonances? Defaults to False.
+
+		Returns:
+			array: Reflected wave power 
+		"""
 		if includesample:
 			return coh_tmm('s', self.get_nvals(includesample=True, exclude_background=exclude_background, exclude_peaks=exclude_peaks), self.get_dvals(includesample=True), 0, 1240/self.energies)
 		else:
 			return coh_tmm('s', self.get_nvals(includesample=False, exclude_background=exclude_background, exclude_peaks=exclude_peaks), self.get_dvals(includesample=False), 0, 1240/self.energies)
 
 	def calc_rc(self, exclude_background=False, exclude_peaks=False):
+		"""Calculates the reflectance contrast of wave power of light normally incident upon the multilayer stack
+
+		Args:
+			exclude_background (bool, optional): exclude background? Defaults to False.
+			exclude_peaks (bool, optional): exclude resonances? Defaults to False.
+
+		Returns:
+			array: The reflectance contrast of the multilayer stack
+		"""
 		target = self.tmm_calc(includesample=True, exclude_background=exclude_background, exclude_peaks=exclude_peaks)['R']
 		ref = self.tmm_calc(includesample=False, exclude_background=exclude_background, exclude_peaks=exclude_peaks)['R']
 		try:
@@ -294,39 +430,29 @@ class TransferMatrixModel:
 		except AttributeError:
 			RC = (target - ref) / ref
 		return RC
-	
-	def calc_rc_resolved(self):
-		RC_dict = {}
-		RC_dict['total'] = self.calc_rc()
-		for peak in self.peaks:
-			if '_voigt' in peak:
-				eps_sample = np.ones_like(self.energies) + self.complex_voigt(self.energies, 
-															self.params['{}_a'.format(peak)].value, 
-															self.params['{}_x0'.format(peak)].value, 
-															self.params['{}_w'.format(peak)].value, 
-															self.params['{}_broadening'.format(peak)].value
-															)
-			elif 'psuedovoigt' in peak:
-				eps_sample = np.ones_like(self.energies) + self.psuedovoigt(self.energies, 
-															self.params['{}_a'.format(peak)].value, 
-															self.params['{}_x0'.format(peak)].value, 
-															self.params['{}_w'.format(peak)].value, 
-															self.params['{}_mixing'.format(peak)].value
-															)
-			else:
-				eps_sample = np.ones_like(self.energies) + self.complex_lorentzian(self.energies, self.params['{}_a'.format(peak)].value, self.params['{}_x0'.format(peak)].value, self.params['{}_w'.format(peak)].value)
 
-			n_sample = np.sqrt(eps_sample)
-			target_nvals = self.get_nvals(includesample=True)
-			# find and replace the sample n with the n containing only one peak
-			for idx, key in enumerate(self.layers.keys()):
-				if 'sample' in key:
-					target_nvals[idx] = n_sample
-			target = coh_tmm('s', target_nvals, self.get_dvals(includesample = True), 0 + 1j*0, 1240/self.energies)['R']
-			ref = coh_tmm('s', self.get_nvals(includesample = False), self.get_dvals(includesample = False), 0 + 1j*0, 1240/self.energies)['R']
-			RC_dict[peak] = (target-ref)/ref
-		return RC_dict
+	def evaluate_resonance(self, peakname, peakfunction):
+		"""Evaluates the output of an individual resonance
+		Args:
+			peakname (str): user-assigned name of resonance (e.g. 'exciton_1s')
+			peakfunction (str): associated function name used to model the resonance (e.g. 'lorentzian')
 
+		Returns:
+			_type_: _description_
+		"""
+		if 'conv' not in peakfunction.__name__:
+			args = list(inspect.signature(peakfunction).parameters)[1:]
+			pars = {arg: self.params['{}_{}'.format(peakname, arg)].value for arg in args}
+			return peakfunction(self.energies, **pars)
+		else:
+			args = list(inspect.signature(peakfunction).parameters)[1:]
+			args = [arg for arg in args if 'conv_fn' not in arg and 'kwargs' not in arg]
+			convargs = list(inspect.signature(self.conv_fn).parameters)[1:] 
+			args.extend(convargs)
+			pars = {arg: self.params['{}_{}'.format(peakname, arg)].value for arg in args}
+			return peakfunction(self.energies, conv_fn=self.conv_fn, **pars)
+
+			
 	def calc_bg(self):
 		args = {}
 		for param in self.params:
@@ -345,13 +471,6 @@ class TransferMatrixModel:
 
 	def loss(self, p):
 		self.params = p 
-		# voigt = False
-		# for peak in self.peaks:
-		# 	if '_voigt' in peak:
-		# 		voigt = True
-		# if voigt: #chop off part of the spectrum due to convolution artifact
-		# 	return (np.array(self.calc_rc())-np.array(self.spectrum))[int(len(self.spectrum) / 11) : int(10 * len(self.spectrum) / 11)]
-		# else:
 		return np.array(self.calc_rc())-np.array(self.spectrum) 
 	
 	def loss_derivative(self, p):
@@ -366,7 +485,7 @@ class TransferMatrixModel:
 		return np.array(self.calc_rc())-np.array(self.spectrum) * self.weights
 
 	def fit(self, weights=None, method='leastsq', **kwargs):
-		# self.verify_params()
+		self.verify_params()
 		if weights is not None:
 			self.weights = weights
 			A = Minimizer(self.weighted_loss, self.params, nan_policy='omit', **kwargs)
@@ -376,6 +495,7 @@ class TransferMatrixModel:
 		return self.result
 
 	def fit_derivative(self, method='leastsq', **kwargs):
+		self.verify_params()
 		A = Minimizer(self.loss_derivative, self.params, nan_policy='omit', **kwargs)
 		self.result = A.minimize(method=method)
 		return self.result
@@ -410,6 +530,7 @@ class TransferMatrixModel:
 		self.fit_opt = {  # default options
 			'derivative': False, 
 			'eps_r': True,
+			'legend': True,
 			'title':            'Sample',  # plot title
 		}
 		for key, value in kw.items():
@@ -437,7 +558,7 @@ class TransferMatrixModel:
 					color='C2', label='$\epsilon_r$ of fit')
 		for peak, value in self.calc_n_sample_resolved(exclude_background=False).items():
 			bg = np.zeros_like(self.energies)
-			if self.background_name in peak:
+			if hasattr(self, 'background_name') and self.background_name in peak :
 				bg = value
 		ns = self.calc_n_sample_resolved(exclude_background=True)
 		for n, (peak, value) in enumerate(ns.items()):
@@ -445,7 +566,8 @@ class TransferMatrixModel:
 				continue
 			ax[1].plot(self.energies, np.imag(value**2) + np.imag(bg**2), linestyle='dashed', color=f'C{n+2}', label=peak)
 			ax[1].fill_between(self.energies, np.imag(value**2) + np.imag(bg**2), color=f'C{n+2}', alpha=0.25)
-		ax[1].legend()
+		if self.fit_opt['legend']:
+			ax[1].legend()
 		ax[1].set_xlabel('Energy (eV)')
 
 class GuessPlot:
