@@ -167,7 +167,7 @@ class TransferMatrixModel:
 		"""Add a resonance to the model
 
 		Args:
-			peak_name (str): Name of resonance, e.g. '1s exciton'
+			peak_name (str): Name of resonance, e.g. '1s_exciton'
 			fn_name (str): Name of function used to model resonance, e.g. 'lorentzian'. Look at all of the static methods to see your options
 			pars (dict): Dictionary of parameter objects. See LMFIT documentation: https://lmfit.github.io/lmfit-py/parameters.html#
 						Keys are arguments to correwsponding function defined by fn_name, values are lmfit parameter lists
@@ -287,7 +287,8 @@ class TransferMatrixModel:
 			self.layers[name] = {'n': n[0], 'd': d[0], 'vary': False, 'imported model': True} 
 		# this clause means that we actually want to vary the refractive index as a fit parameter (hopefully this does not occur often, as it only works for constant values of nreal and nimag)
 		elif 'none' in path and 'sample' not in name:
-			if n[0] is complex:
+		
+			if isinstance(n[0], complex):
 				nreal = [float(np.real(n[0])), n[1], np.real(n[2]), np.real(n[3])]
 				nimag = [float(np.imag(n[0])), n[1], np.imag(n[2]), np.imag(n[3])]
 				self.params.add('{}_nreal'.format(name), *nreal)
@@ -324,8 +325,9 @@ class TransferMatrixModel:
 					nvals.append(self.layers[layer]['n']) # pre-existing model stored in the layer dictionary
 				else:
 					try:
-						nreal = self.params['{}_nreal'.format(layer)].value*np.ones_like(self.energies)
-						nimag = self.params['{}_imag'.format(layer)].value*np.ones_like(self.energies)
+						layer_trimmed = layer.replace('_n', '')
+						nreal = self.params['{}_nreal'.format(layer_trimmed)].value*np.ones_like(self.energies)
+						nimag = self.params['{}_nimag'.format(layer_trimmed)].value*np.ones_like(self.energies)
 						nvals.append(nreal+nimag*1j) # fit parameter stored in the params object
 					except KeyError:
 						nvals.append(self.params['{}_n'.format(layer)].value*np.ones_like(self.energies)) # fit parameter stored in the params object
@@ -358,10 +360,10 @@ class TransferMatrixModel:
 		Returns:
 			array of complex floats: The complex refractive index of the sample
 		"""
+		eps_sample = np.zeros_like(self.energies) + 1j*np.zeros_like(self.energies)
+
 		if hasattr(self, 'background_eps') and not exclude_background:
 			eps_sample = eps_sample + self.calc_bg_eps()
-		else:
-			eps_sample = np.ones_like(self.energies, complex)
 
 		if not exclude_peaks:
 			for peakname, peakfunction in self.peaks.items():
@@ -382,7 +384,7 @@ class TransferMatrixModel:
 		ns_dict = {}
 		ns_dict['total'] = self.calc_n_sample()
 		for peakname, peakfunction in self.peaks.items():
-			eps_sample = np.ones_like(self.energies, complex)
+			eps_sample = np.ones_like(self.energies) + 1j * np.ones_like(self.energies)
 			eps_sample += self.evaluate_resonance(peakname, peakfunction)
 
 			if not exclude_background and  hasattr(self, 'background_name') :
@@ -424,7 +426,11 @@ class TransferMatrixModel:
 		ref = self.tmm_calc(includesample=False, exclude_background=exclude_background, exclude_peaks=exclude_peaks)['R']
 		try:
 			if not exclude_background:
-				RC = (target - ref) / ref + self.calc_bg()
+				RC = (target - ref) / ref
+				if hasattr(self, 'background_name'):
+					RC += self.calc_bg()
+				if hasattr(self, 'background_eps_name'):
+					RC += self.calc_bg_eps()
 			else:
 				RC = (target - ref) / ref
 		except AttributeError:
@@ -550,7 +556,7 @@ class TransferMatrixModel:
 		ax[0].set_title(self.fit_opt['title'])
 		ax[0].set_ylabel('$\Delta R/R$')
 		ax[0].legend()
-		eps = self.calc_n_sample(exclude_background=True)**2
+		eps = self.calc_n_sample(exclude_background=False)**2
 		ax[1].plot(self.energies, np.imag(eps),
 				color='C1', label='$\epsilon_i$ of fit')
 		if self.fit_opt['eps_r']:
