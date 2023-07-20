@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name='OptiFit',
     packages = ['OptiFit'],
-    version='1.1',
+    version='1.2',
     license='MIT',
     description='Combining methods from solcore and lmfit for an easy-to-use fitting procedure of thin film reflection contrast data and PL data',
     author='Aidan OBeirne',
