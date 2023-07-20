@@ -429,8 +429,6 @@ class TransferMatrixModel:
 				RC = (target - ref) / ref
 				if hasattr(self, 'background_name'):
 					RC += self.calc_bg()
-				if hasattr(self, 'background_eps_name'):
-					RC += self.calc_bg_eps()
 			else:
 				RC = (target - ref) / ref
 		except AttributeError:
