@@ -236,8 +236,8 @@ class TransferMatrixModel:
 
 		Args:
 			name (str): Name of layer (e.g. 'hBN')
-			d (list): LMFIT parameter list corresponding to the thickness of each layer (see add_resonance method or LMFIT documentation)
-			n (_type_): LMFIT parameter list corresponding to the refractive index of each layer (see add_resonance method or LMFIT documentation)
+			d (list): LMFIT parameter list corresponding to the thickness of the layer (see add_resonance method or LMFIT documentation)
+			n (list): LMFIT parameter list corresponding to the refractive index of the layer (see add_resonance method or LMFIT documentation)
 		"""
 		graphite_words = ['graphene', 'Graphene', 'graphite', 'Graphite', 'gr', 'Gr']
 		fused_silica_words = ['SiO2', 'sio2', 'oxide', 'silica']
@@ -301,6 +301,17 @@ class TransferMatrixModel:
 		# always add the thicknesses to the parameters object
 		self.params.add('{}_d'.format(name), *d)
 
+	def add_alternate_ref_d(self, name, d):
+		"""Sometimes the reference spectrum is taken in a region where the thicknesses of each layer are slightly different. This function
+		adds an additional thickness fit parameter to the model, which corresponds to the thickness of the layer in the reference structure.
+
+		Args:
+			name (str): Exact name of the layer with a different thickness in the ref structure
+			d (list): LMFIT parameter list corresponding to the thickness of the layer (see add_resonance method or LMFIT documentation)
+		"""
+		self.layers[name]['d_alternate_ref'] = d
+		self.params.add('{}_d_alternate_ref'.format(name), *d)
+
 	def get_nvals(self, includesample, exclude_background=False, exclude_peaks=False):
 		"""Retrieves the complex refractive indices of each layer as a function of energy
 
@@ -346,6 +357,10 @@ class TransferMatrixModel:
 		for layer in self.layers.keys():
 			if 'sample' in layer and not includesample:
 				continue
+			if not includesample and 'd_alternate_ref' in self.layers[layer].keys():
+				dvals.append(self.params['{}_d_alternate_ref'.format(layer)].value)
+				continue
+				
 			dvals.append(self.params['{}_d'.format(layer)].value)
 		return dvals
 
@@ -355,15 +370,15 @@ class TransferMatrixModel:
 		Args:
 			exclude_background (bool, optional): Whether or not to exclude any user-defined background function. Defaults to False.
 			exclude_peaks (bool, optional): Whether or not to exclude the resonances (this allows one to visualize only the contribution from 
-											a user-defined backgroun). Defaults to False.
+											a user-defined background). Defaults to False.
 
 		Returns:
 			array of complex floats: The complex refractive index of the sample
 		"""
-		eps_sample = np.zeros_like(self.energies) + 1j*np.zeros_like(self.energies)
+		eps_sample = np.ones_like(self.energies) + 1j * np.zeros_like(self.energies)
 
 		if hasattr(self, 'background_eps') and not exclude_background:
-			eps_sample = eps_sample + self.calc_bg_eps()
+			eps_sample += self.calc_bg_eps()
 
 		if not exclude_peaks:
 			for peakname, peakfunction in self.peaks.items():
@@ -384,11 +399,12 @@ class TransferMatrixModel:
 		ns_dict = {}
 		ns_dict['total'] = self.calc_n_sample()
 		for peakname, peakfunction in self.peaks.items():
-			eps_sample = np.ones_like(self.energies) + 1j * np.ones_like(self.energies)
+			if 'background' in peakname:
+				continue
+			eps_sample = np.ones_like(self.energies) + 1j * np.zeros_like(self.energies)
 			eps_sample += self.evaluate_resonance(peakname, peakfunction)
-
-			if not exclude_background and  hasattr(self, 'background_name') :
-				eps_sample = eps_sample + self.calc_bg()
+			if hasattr(self, 'background_eps') and not exclude_background:
+				eps_sample += self.calc_bg_eps()
 
 			ns_dict[peakname] = np.sqrt(eps_sample)
 
@@ -466,11 +482,12 @@ class TransferMatrixModel:
 		return  bg 
 
 	def calc_bg_eps(self):
+		bg_eps = np.zeros_like(self.energies, dtype=complex)
 		args = {}
 		for param in self.params:
 			if self.background_eps_name in param:
 				args[param.split('_')[-1]] = self.params[param].value
-		bg_eps = self.background_eps(energies=self.energies, **args)
+		bg_eps += self.background_eps(energies=self.energies, **args)#.astype(bg_eps.dtype)
 		return  bg_eps 
 
 	def loss(self, p):
@@ -509,8 +526,12 @@ class TransferMatrixModel:
 			minval = self.params[param].min 
 			val = self.params[param].value 
 			maxval = self.params[param].max
-			if (minval == val or maxval == val) and val != np.inf:
-				raise ValueError('{} has an initial guess that is not within the bounds'.format(param))
+			if minval == val and val != np.inf:
+				self.params[param].set(min=minval + 1e-20)
+			if maxval == val and val != np.inf:
+				self.params[param].set(max=minval - 1e-20)
+			# if (minval == val or maxval == val) and val != np.inf:
+			# 	raise ValueError('{} has an initial guess that is not within the bounds'.format(param))
 			else:
 				pass
 
@@ -535,7 +556,7 @@ class TransferMatrixModel:
 			'derivative': False, 
 			'eps_r': True,
 			'legend': True,
-			'title':            'Sample',  # plot title
+			'title':  'Sample',  # plot title
 		}
 		for key, value in kw.items():
 			self.fit_opt[key] = value
@@ -561,12 +582,12 @@ class TransferMatrixModel:
 			ax[1].plot(self.energies, np.real(eps),
 					color='C2', label='$\epsilon_r$ of fit')
 		for peak, value in self.calc_n_sample_resolved(exclude_background=False).items():
-			bg = np.zeros_like(self.energies)
-			if hasattr(self, 'background_name') and self.background_name in peak :
+			bg = np.zeros_like(self.energies, dtype=complex)
+			if hasattr(self, 'background_eps') and self.background_eps_name in peak:
 				bg = value
 		ns = self.calc_n_sample_resolved(exclude_background=True)
 		for n, (peak, value) in enumerate(ns.items()):
-			if 'total' in peak:
+			if 'total' in peak or 'background' in peak:
 				continue
 			ax[1].plot(self.energies, np.imag(value**2) + np.imag(bg**2), linestyle='dashed', color=f'C{n+2}', label=peak)
 			ax[1].fill_between(self.energies, np.imag(value**2) + np.imag(bg**2), color=f'C{n+2}', alpha=0.25)
@@ -596,15 +617,13 @@ class GuessPlot:
 			
 
 		if  self.guess_fig_id is not None and plt.fignum_exists(self.guess_fig_id):  # If the figure exists and was not closed
-			# print('already exists')
 			self.guess_fig = plt.figure(self.guess_fig_id)  # Get the existing figure
 			self.guess_raw_line.set_ydata(self.spec)  # Update the data of the line object
 			self.guess_pred_line.set_ydata(self.spec_fit)
 		else:  # If the figure does not exist or was closed, create it
-			# print('fig doesnt exist or was exited')
 			self.guess_fig, self.guess_ax = plt.subplots()
 			self.guess_fig_id = self.guess_fig.number  # Save the figure ID
-			self.guess_raw_line, = self.guess_ax.plot(self.model.energies, self.spec, 'k+', label='spectrum')
+			self.guess_raw_line, = self.guess_ax.plot(self.model.energies, self.spec, 'k', label='spectrum')
 			self.guess_pred_line, = self.guess_ax.plot(self.model.energies, self.spec_fit, 'r', label='initial guess')
 
 		self.guess_ax.relim()
