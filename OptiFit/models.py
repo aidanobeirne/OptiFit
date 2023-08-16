@@ -601,6 +601,7 @@ class GuessPlot:
 		self.guess_fig_id = None
 		self.spec = None
 		self.spec_fit = None
+		self.params = None
 
 	def plot_guess(self, **kw):
 		self.guess_opt = {  # default options
@@ -610,12 +611,18 @@ class GuessPlot:
 			self.guess_opt[key] = value
 		if self.guess_opt['derivative'] == True:
 			self.spec = np.gradient(self.model.spectrum, self.model.energies)
-			self.spec_fit = np.gradient(self.model.calc_rc(), self.model.energies)
+			if isinstance(self.model, TransferMatrixModel):
+				self.spec_fit = np.gradient(self.model.calc_rc(), self.model.energies)
+			else:
+				self.spec_fit = np.gradient(self.model.eval(self.params), self.model.energies)
+
 		else:
 			self.spec = self.model.spectrum
-			self.spec_fit = self.model.calc_rc()
+			if isinstance(self.model, TransferMatrixModel):
+				self.spec_fit = self.model.calc_rc()
+			else:
+				self.spec_fit = self.model.eval(self.params)
 			
-
 		if  self.guess_fig_id is not None and plt.fignum_exists(self.guess_fig_id):  # If the figure exists and was not closed
 			self.guess_fig = plt.figure(self.guess_fig_id)  # Get the existing figure
 			self.guess_raw_line.set_ydata(self.spec)  # Update the data of the line object
@@ -636,15 +643,26 @@ class GuessPlot:
 class CompositeModel():
 	"""Used to fit PL data with a variable number of peaks
 	"""
-	def __init__(self):
+	def __init__(self, spectrum=None, energies=None):
+		self.spectrum = spectrum
+		self.energies = energies
+		self.result = None
+		self.params = Parameters()
 		self.components = {}
 
 	def add_component(self, func_or_model, params_dict, name='peak1'):
 		if name[-1] != '_':
 			name += '_'
-		mod = func_or_model(prefix=name)
-		for parameter, pdict in params_dict.items():
-			mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
+		
+		if type(func_or_model) is Model:
+			
+			mod = func_or_model
+			for parameter, pdict in params_dict.items():
+				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
+		else:
+			mod = func_or_model(prefix=name)
+			for parameter, pdict in params_dict.items():
+				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
 		self.components[name] = mod # internal reference to the specific component
 		try:
 			self.Model += mod # add component to the model
@@ -652,21 +670,37 @@ class CompositeModel():
 			self.Model = mod
 
 	def fit(self, data, params=None, weights=None, method='leastsq', iter_cb=None, scale_covar=True, verbose=False, fit_kws=None, nan_policy=None, calc_covar=True, max_nfev=None, **kwargs):
-		result = self.Model.fit(data, params, weights, method, iter_cb, scale_covar, verbose, fit_kws, nan_policy, calc_covar, max_nfev, **kwargs)
-		self.result = result
+		self.result = self.Model.fit(data, params, weights, method, iter_cb, scale_covar, verbose, fit_kws, nan_policy, calc_covar, max_nfev, **kwargs)
+		return self.result
+
+	def eval(self, params=None, **kwargs):
+		result = self.Model.eval(params, x=self.energies, **kwargs)
 		return result
 
-	def plot_fit_resolved(self, energies, data):
+	def generate_curves(self):
+		curves = {}
+		for component_name, model in self.components.items():
+			params = {}
+			for name in model.param_names:
+				# find this parameter value in the instance Model and assign it to the parameter here
+				params[name.removeprefix(component_name)] = self.result.params[name].value
+			if component_name[-1] == '_':
+				component_name = component_name[0:-1]
+			curves[component_name] = model.eval(**params, x=self.energies)
+		return curves
+
+
+	def plot_fit_resolved(self, energies=None, data=None):
 		plt.figure()
-		plt.plot(energies, data, label='data', marker = 'o', color='black', markersize=1, linewidth=0.5)
+		plt.plot(self.energies, self.spectrum, label='data', marker = 'o', color='black', markersize=1, linewidth=0.5)
 		
 		for component_name, model in self.components.items():
 			params = {}
 			for name in model.param_names:
 				# find this parameter value in the instance Model and assign it to the parameter here
 				params[name.removeprefix(component_name)] = self.result.params[name].value
-			spec = model.eval(**params, x=energies)
-			plt.plot(energies, spec, label = component_name[:-1])
+			spec = model.eval(**params, x=self.energies)
+			plt.plot(self.energies, spec, label = component_name[:-1])
 		plt.legend()
 	
 	def plot_fit_color_coded(self, energies, data):
