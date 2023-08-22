@@ -688,77 +688,11 @@ class CompositeModel():
 				component_name = component_name[0:-1]
 			curves[component_name] = model.eval(**params, x=self.energies)
 		return curves
-
-
-	def plot_fit_resolved(self, energies=None, data=None):
-		plt.figure()
-		plt.plot(self.energies, self.spectrum, label='data', marker = 'o', color='black', markersize=1, linewidth=0.5)
 		
-		for component_name, model in self.components.items():
-			params = {}
-			for name in model.param_names:
-				# find this parameter value in the instance Model and assign it to the parameter here
-				params[name.removeprefix(component_name)] = self.result.params[name].value
-			spec = model.eval(**params, x=self.energies)
-			plt.plot(self.energies, spec, label = component_name[:-1])
-		plt.legend()
-	
-	def plot_fit_color_coded(self, energies, data):
-		from matplotlib.collections import LineCollection
-		from matplotlib.colors import to_rgb, rgb_to_hsv
-		from matplotlib.lines import Line2D
-		fig, ax = plt.subplots()
-		ax.plot(energies, data, label='data', marker = 'o', color='black', markersize=1, linewidth=0.5, zorder=0)
+	def update_params_initial_guess(self):
+		for pname in self.params:
+			self.params[pname].init_value = self.params[pname].value
 
-		curves = []
-		curvenames = []
-		colors = []
-		# retrieve each curve
-		for count, (component_name, model) in enumerate(self.components.items()):
-			params = {}
-			for name in model.param_names:
-				# find this parameter value in the instance Model and assign it to the parameter here
-				params[name.removeprefix(component_name)] = self.result.params[name].value
-			spec = model.eval(**params, x=energies)
-			curves.append(spec)
-			colors.append(to_rgb('C{}'.format(count)))
-			curvenames.append(name.split('_')[0])
 
-		curve_to_plot = np.argmax(np.array(curves).T, axis=1)
-		curve_changes = np.where(curve_to_plot[:-1] != curve_to_plot[1:])[0]
-		segment_names = []
-		segments = []
-		segment_colors = []
 
-		for count, changeidx in enumerate(curve_changes):
-			curveidx = curve_to_plot[changeidx-1]
-			if count == 0:
-				x = np.array(energies[0:changeidx+1])
-				y = np.array(self.result.best_fit[0:changeidx+1])
-			else:
-				x = np.array(energies[curve_changes[count-1]:changeidx+1])
-				y = np.array(self.result.best_fit[curve_changes[count-1]:changeidx+1])
-			
-			new_segment = np.column_stack((x,y))
-			segments.append(new_segment)
-			segment_colors.append(colors[curveidx])
-			segment_names.append(curvenames[curveidx])
-			
-			if count == len(curve_changes)-1: # need to add the last curve
-				curveidx = curve_to_plot[changeidx+1]
-				x = np.array(energies[changeidx:-1])
-				y = np.array(self.result.best_fit[changeidx:-1])
-				new_segment = np.column_stack((x,y))
-				segments.append(new_segment)
-				segment_colors.append(colors[curveidx])
-				segment_names.append(curvenames[curveidx])
-				
-		line_segments = LineCollection(segments, colors=segment_colors, linewidths=3)
-		proxies = []
-		for color in colors:
-			proxy = Line2D([0, 1], [0, 1], color=color)
-			proxies.append(proxy)
-		ax.legend(proxies, curvenames)
-		ax.add_collection(line_segments)
-		plt.show()
 
