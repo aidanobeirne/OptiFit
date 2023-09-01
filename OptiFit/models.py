@@ -655,13 +655,12 @@ class CompositeModel():
 			name += '_'
 		
 		if type(func_or_model) is Model:
+			
 			mod = func_or_model
 			for parameter, pdict in params_dict.items():
 				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
 		else:
-			independent_var = list(inspect.signature(func_or_model).parameters)[0]
-			args = list(inspect.signature(func_or_model).parameters)[1:]
-			mod = Model(func_or_model, prefix=name)
+			mod = func_or_model(prefix=name)
 			for parameter, pdict in params_dict.items():
 				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
 		self.components[name] = mod # internal reference to the specific component
@@ -671,11 +670,7 @@ class CompositeModel():
 			self.Model = mod
 
 	def fit(self, data, params=None, weights=None, method='leastsq', iter_cb=None, scale_covar=True, verbose=False, fit_kws=None, nan_policy=None, calc_covar=True, max_nfev=None, **kwargs):
-		if params is None:
-			self.params = self.Model.make_params()
-		else:
-			self.params = params
-		self.result = self.Model.fit(data, self.params, weights, method, iter_cb, scale_covar, verbose, fit_kws, nan_policy, calc_covar, max_nfev, **kwargs)
+		self.result = self.Model.fit(data, params, weights, method, iter_cb, scale_covar, verbose, fit_kws, nan_policy, calc_covar, max_nfev, **kwargs)
 		return self.result
 
 	def eval(self, params=None, **kwargs):
