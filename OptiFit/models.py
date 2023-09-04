@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from more_itertools import last
 import numpy as np
 import csv
+import types
 import inspect
 from solcore.absorption_calculator.tmm_core_vec import coh_tmm
 import os
@@ -654,7 +655,7 @@ class CompositeModel():
 		if name[-1] != '_':
 			name += '_'
 		
-		if type(func_or_model) is Model:
+		if issubclass(func_or_model, Model):
 			mod = func_or_model(prefix=name)
 			for parameter, pdict in params_dict.items():
 				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
