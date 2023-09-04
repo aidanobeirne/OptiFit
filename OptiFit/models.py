@@ -655,12 +655,11 @@ class CompositeModel():
 			name += '_'
 		
 		if type(func_or_model) is Model:
-			
-			mod = func_or_model
+			mod = func_or_model(prefix=name)
 			for parameter, pdict in params_dict.items():
 				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
 		else:
-			mod = func_or_model(prefix=name)
+			mod = Model(func_or_model, prefix=name)
 			for parameter, pdict in params_dict.items():
 				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
 		self.components[name] = mod # internal reference to the specific component
