@@ -1,5 +1,5 @@
 from xml.dom.minidom import Attr
-from lmfit import Parameters, Minimizer, report_fit, Model
+from lmfit import Parameters, Minimizer, report_fit, Model, models
 import matplotlib.pyplot as plt
 from more_itertools import last
 import numpy as np
@@ -659,10 +659,12 @@ class CompositeModel():
 			mod = func_or_model(prefix=name)
 			for parameter, pdict in params_dict.items():
 				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
-		else:
+		elif isinstance(func_or_model, types.FunctionType):
 			mod = Model(func_or_model, prefix=name)
 			for parameter, pdict in params_dict.items():
 				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
+		else:
+			raise ValueError('Custom function type not valid')
 		self.components[name] = mod # internal reference to the specific component
 		try:
 			self.Model += mod # add component to the model
