@@ -638,7 +638,6 @@ class GuessPlot:
 		self.guess_ax.autoscale_view(True, True, True)
 		plt.draw()
 		plt.pause(0.01)
-
 	
 			
 class CompositeModel():
@@ -654,12 +653,15 @@ class CompositeModel():
 	def add_component(self, func_or_model, params_dict, name='peak1'):
 		if name[-1] != '_':
 			name += '_'
-		
-		if issubclass(func_or_model, Model):
-			mod = func_or_model(prefix=name)
-			for parameter, pdict in params_dict.items():
-				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
-		elif isinstance(func_or_model, types.FunctionType):
+		try:
+			if issubclass(func_or_model, Model):
+				mod = func_or_model(prefix=name)
+				for parameter, pdict in params_dict.items():
+					mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
+		except TypeError:
+			pass
+
+		if isinstance(func_or_model, types.FunctionType):
 			mod = Model(func_or_model, prefix=name)
 			for parameter, pdict in params_dict.items():
 				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
