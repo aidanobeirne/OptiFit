@@ -653,20 +653,31 @@ class CompositeModel():
 	def add_component(self, func_or_model, params_dict, name='peak1'):
 		if name[-1] != '_':
 			name += '_'
-		try:
-			if issubclass(func_or_model, Model):
-				mod = func_or_model(prefix=name)
-				for parameter, pdict in params_dict.items():
-					mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
-		except TypeError:
-			pass
 
-		if isinstance(func_or_model, types.FunctionType):
-			mod = Model(func_or_model, prefix=name)
+		module_name = getattr(func_or_model, '__module__', None)
+		if 'lmfit' in module_name:
+			mod = func_or_model(prefix=name)
 			for parameter, pdict in params_dict.items():
 				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
 		else:
-			raise ValueError('Custom function type not valid')
+			mod = Model(func_or_model, prefix=name)
+			for parameter, pdict in params_dict.items():
+				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
+
+		# try:
+		# 	if issubclass(func_or_model, Model):
+		# 		mod = func_or_model(prefix=name)
+		# 		for parameter, pdict in params_dict.items():
+		# 			mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
+		# except TypeError:
+		# 	pass
+
+		# if isinstance(func_or_model, types.FunctionType):
+		# 	mod = Model(func_or_model, prefix=name)
+		# 	for parameter, pdict in params_dict.items():
+		# 		mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
+		# else:
+		# 	raise ValueError('Custom function type not valid')
 		self.components[name] = mod # internal reference to the specific component
 		try:
 			self.Model += mod # add component to the model
