@@ -115,6 +115,7 @@ class TransferMatrixModel:
 		result[~condition] = lor2 / normalization2
 		result = f * result
 		return result
+		
 
 	@staticmethod
 	def convd_lorentzian(E, f, E0, gamma, conv_fn, **kwargs):
@@ -570,8 +571,7 @@ class TransferMatrixModel:
 			spec_fit = self.calc_rc()
 
 		fig, ax = plt.subplots(2, 1)
-		ax[0].plot(self.energies, spec, marker='.', markersize=2,
-				linestyle="None", color='0', label='Raw Data')
+		ax[0].plot(self.energies, spec,  color='0', label='Raw Data')
 		ax[0].plot(self.energies, spec_fit, color='C0', label='Fit Data')
 		ax[0].set_title(self.fit_opt['title'])
 		ax[0].set_ylabel('$\Delta R/R$')
@@ -685,12 +685,28 @@ class CompositeModel():
 			self.Model = mod
 
 	def fit(self, data, params=None, weights=None, method='leastsq', iter_cb=None, scale_covar=True, verbose=False, fit_kws=None, nan_policy=None, calc_covar=True, max_nfev=None, **kwargs):
+		params = self.verify_params(params)
 		self.result = self.Model.fit(data, params, weights, method, iter_cb, scale_covar, verbose, fit_kws, nan_policy, calc_covar, max_nfev, **kwargs)
 		return self.result
 
 	def eval(self, params=None, **kwargs):
 		result = self.Model.eval(params, x=self.energies, **kwargs)
 		return result
+	
+	def verify_params(self, params=None):
+		params = self.params if params is None else params
+		for param in params:
+			minval = params[param].min 
+			val = params[param].value 
+			maxval = params[param].max
+			if minval == val and val != np.inf:
+				params[param].set(min=minval + 1e-20)
+			if maxval == val and val != np.inf:
+				params[param].set(max=minval - 1e-20)
+			else:
+				pass
+		self.params = params
+		return params
 
 	def generate_curves(self):
 		curves = {}
