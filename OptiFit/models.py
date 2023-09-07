@@ -656,28 +656,19 @@ class CompositeModel():
 
 		module_name = getattr(func_or_model, '__module__', None)
 		if 'lmfit' in module_name:
-			mod = func_or_model(prefix=name)
+			if isinstance(func_or_model, Model):
+				# Custom model instance was already instantiated by the user
+				mod = func_or_model
+			else:
+				# User has provided a reference to a built-in LMfit Model class, e.g. SplitLorentzianModel
+				mod = func_or_model(prefix=name)
 			for parameter, pdict in params_dict.items():
 				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
 		else:
+			# Custom model instance has not yet been wrapped by LMfit Model class
 			mod = Model(func_or_model, prefix=name)
 			for parameter, pdict in params_dict.items():
 				mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
-
-		# try:
-		# 	if issubclass(func_or_model, Model):
-		# 		mod = func_or_model(prefix=name)
-		# 		for parameter, pdict in params_dict.items():
-		# 			mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
-		# except TypeError:
-		# 	pass
-
-		# if isinstance(func_or_model, types.FunctionType):
-		# 	mod = Model(func_or_model, prefix=name)
-		# 	for parameter, pdict in params_dict.items():
-		# 		mod.set_param_hint('{}{}'.format(name, parameter), **pdict)
-		# else:
-		# 	raise ValueError('Custom function type not valid')
 		self.components[name] = mod # internal reference to the specific component
 		try:
 			self.Model += mod # add component to the model
