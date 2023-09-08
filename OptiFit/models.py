@@ -643,7 +643,7 @@ class GuessPlot:
 class CompositeModel():
 	"""Used to fit PL data with a variable number of peaks
 	"""
-	def __init__(self, spectrum=None, energies=None):
+	def __init__(self, spectrum, energies):
 		self.spectrum = spectrum
 		self.energies = energies
 		self.result = None
@@ -675,29 +675,30 @@ class CompositeModel():
 		except AttributeError:
 			self.Model = mod
 
-	def fit(self, data, params=None, weights=None, method='leastsq', iter_cb=None, scale_covar=True, verbose=False, fit_kws=None, nan_policy=None, calc_covar=True, max_nfev=None, **kwargs):
-		params = self.verify_params(params)
-		self.result = self.Model.fit(data, params, weights, method, iter_cb, scale_covar, verbose, fit_kws, nan_policy, calc_covar, max_nfev, **kwargs)
+	def fit(self, data=None, params=None, weights=None, method='leastsq', iter_cb=None, scale_covar=True, verbose=False, fit_kws=None, nan_policy=None, calc_covar=True, max_nfev=None, **kwargs):
+		data = self.spectrum if data is None else data
+		self.params = self.Model.make_params() if params is  None else params
+		self.verify_params()
+		self.result = self.Model.fit(data, self.params, weights, method, iter_cb, scale_covar, verbose, fit_kws, nan_policy, calc_covar, max_nfev, x=self.energies, **kwargs)
 		return self.result
 
 	def eval(self, params=None, **kwargs):
-		result = self.Model.eval(params, x=self.energies, **kwargs)
+		self.params = self.Model.make_params() if params is None else params
+		result = self.Model.eval(self.params, x=self.energies, **kwargs)
 		return result
 	
-	def verify_params(self, params=None):
-		params = self.params if params is None else params
-		for param in params:
-			minval = params[param].min 
-			val = params[param].value 
-			maxval = params[param].max
+	def verify_params(self):
+		self.params = self.Model.make_params() if self.params is None else self.params
+		for param in self.params:
+			minval = self.params[param].min 
+			val = self.params[param].value 
+			maxval = self.params[param].max
 			if minval == val and val != np.inf:
-				params[param].set(min=minval + 1e-20)
+				self.params[param].set(min=minval + 1e-20)
 			if maxval == val and val != np.inf:
-				params[param].set(max=minval - 1e-20)
+				self.params[param].set(max=minval - 1e-20)
 			else:
 				pass
-		self.params = params
-		return params
 
 	def generate_curves(self):
 		curves = {}
